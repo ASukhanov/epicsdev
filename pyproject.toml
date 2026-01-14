@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "epicsdev"
+version = "0.0.0"
+authors = [
+  { name="Andrey Sukhanov", email="sukhanov@bnl.gov" },
+]
+description = "Helper module for creating EPICS PVAccess servers using p4p"
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "p4p",
+]
+[project.urls]
+"Homepage" = "https://github.com/ASukhanov/epicsdev"
+"Bug Tracker" = "https://github.com/ASukhanov/epicsdev"
