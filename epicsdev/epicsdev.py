@@ -1,11 +1,15 @@
 """Skeleton and helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v1.0.1 26-01-16'# rng range = nPatterns
+__version__= 'v1.0.2 26-01-18'# --list define directory to save list of PVs.
 #TODO: NTEnums do not have structure display
 #TODO: Add performance counters to demo.
+#Issue: There is no way in PVAccess to specify if string PV is writable.
+# As a workaround we append description with suffix ' Features: W' to indicate that.
 
 import sys
 import time
+from time import perf_counter as timer
+import os
 from p4p.nt import NTScalar, NTEnum
 from p4p.nt.enum import ntenum
 from p4p.server import Server
@@ -105,7 +109,11 @@ def _create_PVs(pvDefs):
 [pvname, description, SPV object, extra], where extra is a dictionary of extra parameters, like setter, units, limits etc. Setter is a function, that will be called when"""
     ts = time.time()
     for defs in pvDefs:
-        pname,desc,spv,extra = defs
+        try:
+            pname,desc,spv,extra = defs
+        except ValueError:
+            printe(f'Invalid PV definition of {defs[0]}')
+            sys.exit(1)
         ivalue = spv.current()
         printv(f'created pv {pname}, initial: {type(ivalue),ivalue}, extra: {extra}')
         C_.PVs[C_.prefix+pname] = spv
@@ -203,7 +211,7 @@ def create_PVs(pvDefs=None):
     U,LL,LH = 'units','limitLow','limitHigh'
     C_.PVDefs = [
 ['version', 'Program version',  SPV(__version__), {}],
-['status',  'Server status',    SPV('?','W'), {}],
+['status',  'Server status. Features: RWE',    SPV('?','W'), {}],
 ['server',  'Server control',   
     SPV('Start Stop Clear Exit Started Stopped Exited'.split(), 'WE'),
         {'setter':set_server}],
@@ -218,80 +226,96 @@ def create_PVs(pvDefs=None):
     _create_PVs(C_.PVDefs)
     return C_.PVs
 
-def get_externalPV(pvName, timeout=0.5):
-    """Get value of PV from another server. That can be used to check if the server is already running, or to get values from other servers."""
+def get_externalPV(pvName:str, timeout=0.5):
+    """Get value of PV from another server. That can be used to check if the
+    server is already running, or to get values from other servers."""
     ctxt = Context('pva')
     return ctxt.get(pvName, timeout=timeout)
 
-def init_epicsdev(prefix, pvDefs, verbose=0):
-    """Check if no other server is running with the same prefix, create PVs and return them as a dictionary."""
+def init_epicsdev(prefix:str, pvDefs:list, listDir:str, verbose:str=0):
+    """Check if no other server is running with the same prefix.
+    Create PVs and return them as a dictionary.
+    The listDir is a directory to save list of all generated PVs,
+    if no directory is given, then </tmp/pvlist/><prefix> is assumed.
+    """
     C_.prefix = prefix
     C_.verbose = verbose
     try:
         get_externalPV(prefix+'version')
-        print(f'Server for {prefix} already running. Exiting.')
+        print(f'ERROR: Server for {prefix} already running. Exiting.')
         sys.exit(1)
     except TimeoutError:
         pass
     pvs = create_PVs(pvDefs)
+    # Save list of PVs to a file, if requested
+    if listDir != '':
+        listDir = '/tmp/pvlist/' if listDir is None else listDir
+        if not os.path.exists(listDir):
+            os.makedirs(listDir)
+        filepath = f'{listDir}{prefix[:-1]}.txt'
+        print(f'Writing list of PVs to {filepath}')
+        with open(filepath, 'w', encoding="utf-8") as f:
+            for _pvname in pvs:
+                f.write(_pvname + '\n')
     return pvs
 
 #``````````````````Demo````````````````````````````````````````````````````````
 if __name__ == "__main__":
+    print(f'epicsdev multiadc demo server {__version__}')
     import numpy as np
     import argparse
 
     def myPVDefs():
         """Example of PV definitions"""
         SET,U,LL,LH = 'setter','units','limitLow','limitHigh'
-        alarm = {'valueAlarm':{'lowAlarmLimit':0, 'highAlarmLimit':100}}
+        alarm = {'valueAlarm':{'lowAlarmLimit':-9., 'highAlarmLimit':9.}}
         return [    # device-specific PVs
-['noiseLevel',  'Noise amplitude',  SPV(1.E-6,'W'), {SET:set_noise}],
+['noiseLevel',  'Noise amplitude',  SPV(1.E-6,'W'), {SET:set_noise, U:'V'}],
 ['tAxis',       'Full scale of horizontal axis', SPV([0.]), {U:'S'}],
 ['recordLength','Max number of points',     SPV(100,'W','u32'),
     {LL:4,LH:1000000, SET:set_recordLength}],
 ['ch1Offset',   'Offset',  SPV(0.,'W'), {U:'du'}],
 ['ch1VoltsPerDiv',  'Vertical scale',       SPV(1E-3,'W'), {U:'V/du'}],
-['timePerDiv',  'Horizontal scale',         SPV(1.E-6,'W'), {U:'S/du'}],
-['ch1Waveform', 'Waveform array',           SPV([0.]), {}],
-['ch1Mean',     'Mean of the waveform',     SPV(0.,'A'), {}],
-['ch1Peak2Peak','Peak-to-peak amplitude',   SPV(0.,'A'), {}],
-['alarm',       'PV with alarm',            SPV(0,'WA'), alarm],
+['ch1Waveform', 'Waveform array',           SPV([0.]), {U:'du'}],
+['ch1Mean',     'Mean of the waveform',     SPV(0.,'A'), {U:'du'}],
+['ch1Peak2Peak','Peak-to-peak amplitude',   SPV(0.,'A'), {U:'du',**alarm}],
+['alarm',       'PV with alarm',            SPV(0,'WA'), {U:'du',**alarm}],
         ]
     nPatterns = 100 # number of waveform patterns.
     pargs = None
-    nDivs = 10 # number of divisions on the oscilloscope screen. That is needed to set tAxis when recordLength is changed.                          
     rng = np.random.default_rng(nPatterns)
+    nPoints = 100
 
     def set_recordLength(value):
         """Record length have changed. The tAxis should be updated accordingly."""
         printi(f'Setting tAxis to {value}')
-        publish('tAxis', np.arange(value)*pvv('timePerDiv')/nDivs)
+        publish('tAxis', np.arange(value)*1.E-6)
         publish('recordLength', value)
         set_noise(pvv('noiseLevel')) # Re-initialize noise array, because its size depends on recordLength
 
     def set_noise(level):
         """Noise level have changed. Update noise array."""
-        printi(f'Setting noise level to {repr(level)}')
+        v = float(level)
         recordLength = pvv('recordLength')
-        pargs.noise = np.random.normal(scale=0.5*level, size=recordLength+nPatterns)
-        print(f'Noise array {len(pargs.noise)} updated with level {repr(level)}')
+        ts = timer()
+        pargs.noise = np.random.normal(scale=0.5*level, size=recordLength+nPatterns)# 45ms/1e6 points
+        printi(f'Noise array[{len(pargs.noise)}] updated with level {v:.4g} V. in {timer()-ts:.4g} S.')
         publish('noiseLevel', level)
 
     def init(recordLength):
         """Testing function. Do not use in production code."""
         set_recordLength(recordLength)
-        set_noise(pvv('noiseLevel'))
+        #set_noise(pvv('noiseLevel')) # already called from set_recordLength
 
     def poll():
         """Example of polling function"""
         #pattern = C_.cycle % nPatterns# produces sliding
         pattern = rng.integers(0, nPatterns)
-        C_.cycle += 1
-        printv(f'cycle {C_.cycle}')
-        publish('cycle', C_.cycle)
+        cycle = pvv('cycle')
+        printv(f'cycle {repr(cycle)}')
+        publish('cycle', cycle + 1)
         wf = pargs.noise[pattern:pattern+pvv('recordLength')].copy()
-        wf *= pvv('ch1VoltsPerDiv')*nDivs
+        wf /= pvv('ch1VoltsPerDiv')
         wf += pvv('ch1Offset')
         publish('ch1Waveform', wf)
         publish('ch1Peak2Peak', np.ptp(wf))
@@ -301,22 +325,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = __doc__,
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     epilog=f'{__version__}')
-    parser.add_argument('-l', '--listPVs', action='store_true', help=
-'List all generated PVs')
+    parser.add_argument('-l', '--list', default='', nargs='?', help=
+'Directory to save list of all generated PVs, if no directory is given, then </tmp/pvlist/><prefix> is assumed.')
     parser.add_argument('-p', '--prefix', default='epicsDev0:', help=
 'Prefix to be prepended to all PVs')
-    parser.add_argument('-n', '--npoints', type=int, default=100, help=
+    # The rest of options are not essential, they can be controlled at runtime using PVs.
+    parser.add_argument('-n', '--npoints', type=int, default=nPoints, help=
 'Number of points in the waveform')
     parser.add_argument('-v', '--verbose', action='count', default=0, help=
-'Show more log messages (-vv: show even more)')
+'Show more log messages (-vv: show even more)') 
     pargs = parser.parse_args()
+    print(pargs)
 
     # Initialize epicsdev and PVs
-    PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose)
-    if pargs.listPVs:
-        print('List of PVs:')
-        for _pvname in PVs:
-            print(_pvname)
+    PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.list, pargs.verbose)
 
     # Initialize the device, using pargs if needed. That can be used to set the number of points in the waveform, for example.
     init(pargs.npoints)

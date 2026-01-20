@@ -16,18 +16,17 @@ def slider(minValue,maxValue):
 
 LargeFont = {'color':'light gray', **font(18), 'fgColor':'dark green'}
 ButtonFont = {'font':['Open Sans Extrabold',14]}# Comic Sans MS
-# Attributes for gray row, it should be in the first cell:
-#GrayRow = {'ATTRIBUTES':{'color':'light gray', **font(12)}}
 LYRow = {'ATTRIBUTES':{'color':'light yellow'}}
 lColor = color('lightGreen')
 
 # definition for plotting cell
 PyPath = 'python -m'
-PaneP2P = ' '.join([f'ch{i+1:01d}Mean' for i in range(1)])
+PaneP2P = ' '.join([f'ch{i+1:01d}Mean ch{i+1:01d}Peak2Peak' for i in range(1)])
 PaneWF = ' '.join([f'ch{i+1:01d}Waveform' for i in range(1)])
 #PaneT = 'timing[1] timing[3]'
-Plot = {'Plot':{'launch':f'{PyPath} pvplot -aV:epicsDev0: -#0"{PaneP2P}" -#1"{PaneWF}"',# -#2"{PaneT}"',
-            **lColor, **ButtonFont}}
+Plot = {'Plot':{'launch':
+  f'{PyPath} pvplot Y-5:5 -aV:epicsDev0: -#0"{PaneP2P}" -#1"{PaneWF}"',# -#2"{PaneT}"',
+  **lColor, **ButtonFont}}
 print(f'Plot command: {Plot}')
 #``````````````````PyPage Object``````````````````````````````````````````````
 class PyPage():
@@ -43,7 +42,7 @@ class PyPage():
         self.title = title
 
         #``````````Page attributes, optional`````````````````````````
-        self.page = {**color(240,240,240)}# Does not work
+        self.page = {**color(240,240,240)}
         #self.page['editable'] = False
 
         #``````````Definition of columns`````````````````````````````
@@ -74,42 +73,14 @@ string or device:parameter and the value is dictionary of the features.
         #FOption = ' -file '+logreqMap.get(D,'')
         #``````````mandatory member```````````````````````````````````````````
         self.rows = [
-['Device:', D, {D+'version':span(2,1)}],#_, 'scope time:', #{D+'dateTime':span(2,1)},_],
+['Device:', D, {D+'version':span(2,1)},_,_,_,_],
 ['State:', D+'server','cycle:',D+'cycle',_,_,Plot], # 'Recall:', D+'setup',],
 ['Status:', {D+'status': span(8,1)}],
-['Polling Interval:', D+'polling','RecLength:',D+'recordLength',
-'V/Div:',D+'ch1VoltsPerDiv'],
-['Noise level:',D+'noiseLevel'],
-#['Triggers recorded:', D+'acqCount', 'Lost:', D+'lostTrigs',
-#  'Acquisitions:',D+'scopeAcqCount'], 
-# ['Horizontal scale:', D+'timePerDiv', '     samples:', D+'recLength',
-#     'SamplRate:', {D+'samplingRate':span(2,1)},_],
-# #['Trigger:', D+'trigSourceS', D+'trigCouplingS', D+'trigSlopeS', 'level:', D+'trigLevelS', 'delay:', {D+'trigDelay':span(2,1)},''],
-# ['Trigger state:',D+'trigState','   trigMode:',D+'trigMode',
-#   'TrigLevel','TrigDelay'],
-# [{D+'trigger':color('lightCyan')}, D+'trigSource', D+'trigCoupling',
-#   D+'trigSlope', D+'trigLevel', D+'trigDelay'],
-[{'ATTRIBUTES':color('lightGreen')}, 'Channels:','CH1','CH2','CH3','CH4','CH5','CH6'],
-# ['Gain:']+ChLine('VoltsPerDiv'),
-# ['Offset:']+ChLine('Position'),
-# ['Coupling:']+ChLine('Coupling'),
-# ['Termination:']+ChLine('Termination'),
-# ['On/Off:']+ChLine('OnOff'),
-#['Delay:']+ChLine('DelayFromTriggerM'),
-#['Waveform:']+ChLine('WaveforM'),
+['Polling Interval:', D+'polling','nPoints:',D+'recordLength',
+	'Noise:',D+'noiseLevel',_],
+[{'ATTRIBUTES':color('lightCyan')},
+	'Channels:','CH1','CH2','CH3','CH4','CH5','CH6'],
+['V/div:']+ChLine('VoltsPerDiv'),
 ['Mean:']+ChLine('Mean'),
 ['Peak2Peak:']+ChLine('Peak2Peak'),
-#[''],
-# ["Trigger",D+'trigSourceS',D+'trigLevelS',D+'trigSlopeS',D+'trigModeS'],
-# ['',"Setup"],
-# ["Repair:",D+'updateDataA',D+'deviceClearA',D+'resetScopeA',D+'forceTrigA'],
-# ["Session",D+'SaveSession',D+'RecallSession',"folder:",D+'folderS'],
-# [D+'currentSessionS',"<-current",D+'nextSessionS',"out off",D+'sessionsM'],
-#[{'ATTRIBUTES':{'color':'yellow'}},
-#['tAxis:',D+'tAxis'],
-# [LYRow,'',{'For Experts only!':{**span(6,1),**font(14)}}],
-# [LYRow,'Scope command:', {D+'instrCmdS':span(2,1)},_,{D+'instrCmdR':span(4,1)}],
-# [LYRow,'Special commands', {D+'instrCtrl':span(2,1)},_,_,_,_,_,],
-# [LYRow,'Timing:',{D+'timing':span(6,1)}],
-# [LYRow,'ActOnEvent',D+'actOnEvent','AOE_Limit',D+'aOE_Limit',_,_,_],
         ]
