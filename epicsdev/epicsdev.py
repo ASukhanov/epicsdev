@@ -1,8 +1,6 @@
 """Skeleton and helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v1.0.2 26-01-18'# --list define directory to save list of PVs.
-#TODO: NTEnums do not have structure display
-#TODO: Add performance counters to demo.
+__version__= 'v2.0.0 26-01-28'# Many updates. SPV meta flag E changed to D for discrete (ENUM) PVs.
 #Issue: There is no way in PVAccess to specify if string PV is writable.
 # As a workaround we append description with suffix ' Features: W' to indicate that.
 
@@ -17,6 +15,9 @@ from p4p.server.thread import SharedPV
 from p4p.client.thread import Context
 
 #``````````````````Module Storage`````````````````````````````````````````````
+def _serverStateChanged(newState:str):
+    """Dummy serverStateChanged function"""
+    return
 class C_():
     """Storage for module members"""
     prefix = ''
@@ -24,10 +25,13 @@ class C_():
     cycle = 0
     serverState = ''
     PVs = {}
-    PVDefs = []
+    PVDefs = [] 
+    serverStateChanged = _serverStateChanged
+
 #```````````````````Helper methods````````````````````````````````````````````
 def serverState():
-    """Return current server state. That is the value of the server PV, but cached in C_ to avoid unnecessary get() calls."""
+    """Return current server state. That is the value of the server PV, but
+    cached in C_ to avoid unnecessary get() calls."""
     return C_.serverState
 def _printTime():
     return time.strftime("%m%d:%H%M%S")
@@ -66,11 +70,14 @@ def pvv(pvName:str):
     return pvobj(pvName).current()
 
 def publish(pvName:str, value, ifChanged=False, t=None):
-    """Publish value to PV. If ifChanged is True, then publish only if the value is different from the current value. If t is not None, then use it as timestamp, otherwise use current time."""
+    """Publish value to PV. If ifChanged is True, then publish only if the 
+    value is different from the current value. If t is not None, then use
+    it as timestamp, otherwise use current time."""
+    #print(f'Publishing {pvName}')
     try:
         pv = pvobj(pvName)
     except KeyError:
-        printw(f'PV {pvName} not found. Cannot publish value.')
+        print(f'WARNING: PV {pvName} not found. Cannot publish value.')
         return
     if t is None:
         t = time.time()
@@ -79,11 +86,15 @@ def publish(pvName:str, value, ifChanged=False, t=None):
 
 def SPV(initial, meta='', vtype=None):
     """Construct SharedPV.
-    meta is a string with characters W,A,E indicating if the PV is writable, has alarm or it is NTEnum.
-    vtype should be one of the p4p.nt type definitions (see https://epics-base.github.io/p4p/values.html).
+    meta is a string with characters W,R,A,D indicating if the PV is writable,
+    has alarm or it is discrete (ENUM).
+    vtype should be one of the p4p.nt type definitions 
+    (see https://epics-base.github.io/p4p/values.html).
     if vtype is None then the nominal type will be determined automatically.
+    initial is the initial value of the PV. It can be a single value or
+    a list/array of values (for array PVs).
     """
-    typeCode = {
+    typeCode = {# mapping from vtype to p4p type code
     's8':'b', 'u8':'B', 's16':'h', 'u16':'H', 'i32':'i', 'u32':'I', 'i64':'l',
     'u64':'L', 'f32':'f', 'f64':'d', str:'s',
     }
@@ -93,20 +104,28 @@ def SPV(initial, meta='', vtype=None):
         itype = type(firstItem)
         vtype = {int: 'i32', float: 'f32'}.get(itype,itype)
     tcode = typeCode[vtype]
-    if 'E' in meta:
+    allowed_chars = 'WRAD'
+    discrete = False
+    for ch in meta:
+        if ch not in allowed_chars:
+            printe(f'Unknown meta character {ch} in SPV definition')
+            sys.exit(1)
+    if 'D' in meta:
+        discrete = True
         initial = {'choices': initial, 'index': 0}
         nt = NTEnum(display=True, control='W' in meta)
     else:
         prefix = 'a' if iterable else ''
-        nt = NTScalar(prefix+tcode, display=True, control='W' in meta, valueAlarm='A' in meta)
+        nt = NTScalar(prefix+tcode, display=True, control='W' in meta,
+                      valueAlarm='A' in meta)
     pv = SharedPV(nt=nt, initial=initial)
+    # add new attributes.
     pv.writable = 'W' in meta
+    pv.discrete = discrete
     return pv
 
 #``````````````````create_PVs()```````````````````````````````````````````````
 def _create_PVs(pvDefs):
-    """Create PVs, using definitions from pvDEfs list. Each definition is a list of the form:
-[pvname, description, SPV object, extra], where extra is a dictionary of extra parameters, like setter, units, limits etc. Setter is a function, that will be called when"""
     ts = time.time()
     for defs in pvDefs:
         try:
@@ -115,15 +134,22 @@ def _create_PVs(pvDefs):
             printe(f'Invalid PV definition of {defs[0]}')
             sys.exit(1)
         ivalue = spv.current()
-        printv(f'created pv {pname}, initial: {type(ivalue),ivalue}, extra: {extra}')
+        printv((f'created pv {pname}, initial: {type(ivalue),ivalue},'
+               f'extra: {extra}'))
+        key = C_.prefix + pname
+        if key in C_.PVs:
+            printe(f'Duplicate PV name: {pname}')
+            sys.exit(1)
         C_.PVs[C_.prefix+pname] = spv
         v = spv._wrap(ivalue, timestamp=ts)
         if spv.writable:
             try:
-                # To indicate that the PV is writable, set control limits to (0,0). Not very elegant, but it works for numerics and enums, not for strings.
+                # To indicate that the PV is writable, set control limits to
+                # (0,0). Not very elegant, but it works for numerics and enums,
+                #  not for strings.
                 v['control.limitLow'] = 0
                 v['control.limitHigh'] = 0
-            except KeyError as e:
+            except KeyError:
                 #print(f'control not set for {pname}: {e}')
                 pass
         if 'ntenum' in str(type(ivalue)):
@@ -140,7 +166,7 @@ def _create_PVs(pvDefs):
                         v[f'valueAlarm.{key}'] = value
             spv.post(v)
 
-        # add new attributes. To my surprise that works!
+        # add new attributes.
         spv.name = pname
         spv.setter = extra.get('setter')
 
@@ -151,7 +177,8 @@ def _create_PVs(pvDefs):
                 vv = op.value()
                 vr = vv.raw.value
                 current = spv._wrap(spv.current())
-                # check limits, if they are defined. That will be a good example of using control structure and valueAlarm.
+                # check limits, if they are defined. That will be a good
+                # example of using control structure and valueAlarm.
                 try:
                     limitLow = current['control.limitLow']
                     limitHigh = current['control.limitHigh']
@@ -162,65 +189,79 @@ def _create_PVs(pvDefs):
                 except KeyError:
                     pass
                 if isinstance(vv, ntenum):
-                    vr = vv
+                    vr = str(vv)
                 if spv.setter:
-                    spv.setter(vr)
+                    spv.setter(vr, spv)
                     # value will be updated by the setter, so get it again
                     vr = pvv(spv.name)
                 printv(f'putting {spv.name} = {vr}')
                 spv.post(vr, timestamp=ct) # update subscribers
                 op.done()
-        #print(f'PV {pv.name} created: {spv}')
 #,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 #``````````````````Setters
-def set_verbosity(level):
+def set_verbose(level, *_):
     """Set verbosity level for debugging"""
     C_.verbose = level
-    publish('verbosity',level)
+    printi(f'Setting verbose to {level}')
+    publish('verbose',level)
 
-def set_server(state=None):
-    """Example of the setter for the server PV."""
-    #printv(f'>set_server({state}), {type(state)}')
-    if state is None:
-        state = pvv('server')
-        printi(f'Setting server state to {state}')
-    state = str(state)
-    if state == 'Start':
+def set_server(servState, *_):
+    """Example of the setter for the server PV.
+    servState can be 'Start', 'Stop', 'Exit' or 'Clear'. If servState is None,
+    then get the desired state from the server PV."""
+    #printv(f'>set_server({servState}), {type(servState)}')
+    if servState is None:
+        servState = pvv('server')
+        printi(f'Setting server state to {servState}')
+    servState = str(servState)
+    C_.serverStateChanged(servState)
+    if servState == 'Start':
         printi('Starting the server')
-        # configure_instrument()
-        # adopt_local_setting()
         publish('server','Started')
         publish('status','Started')
-    elif state == 'Stop':
+    elif servState == 'Stop':
         printi('server stopped')
         publish('server','Stopped')
         publish('status','Stopped')
-    elif state == 'Exit':
+    elif servState == 'Exit':
         printi('server is exiting')
         publish('server','Exited')
         publish('status','Exited')
-    elif state == 'Clear':
-        publish('acqCount', 0)
+    elif servState == 'Clear':
         publish('status','Cleared')
-        # set server to previous state
+        # set server to previous servState
         set_server(C_.serverState)
-    C_.serverState = state
+        return
+    C_.serverState = servState
 
 def create_PVs(pvDefs=None):
-    """Creates manadatory PVs and adds PVs specified in pvDefs list"""
+    """Creates manadatory PVs and adds PVs specified in pvDefs list.
+    Returns dictionary of created PVs.
+    Each definition is a list of the form:
+    [pvname, description, SPV object, extra], where extra is a dictionary of
+    extra parameters.
+    Extra parameters can include:
+    'setter' : function to be called on put
+    'units'  : string with units
+    'limitLow'  : low control limit
+    'limitHigh' : high control limit
+    'format'    : format string
+    'valueAlarm': dictionary with valueAlarm parameters, like
+        'lowAlarmLimit', 'highAlarmLimit', etc."""
     U,LL,LH = 'units','limitLow','limitHigh'
     C_.PVDefs = [
 ['version', 'Program version',  SPV(__version__), {}],
-['status',  'Server status. Features: RWE',    SPV('?','W'), {}],
-['server',  'Server control',   
-    SPV('Start Stop Clear Exit Started Stopped Exited'.split(), 'WE'),
+['status',  'Server status. Features: RWE',    SPV('','W'), {}],
+['server',  'Server control',
+    SPV('Start Stop Clear Exit Started Stopped Exited'.split(), 'WD'),
         {'setter':set_server}],
-['verbosity', 'Debugging verbosity', SPV(0,'W','u8'),
-        {'setter':set_verbosity}],
+['verbose', 'Debugging verbosity', SPV(C_.verbose,'W','u8'),
+        {'setter':set_verbose, LL:0,LH:3}],
 ['polling', 'Polling interval', SPV(1.0,'W'), {U:'S', LL:0.001, LH:10.1}],
 ['cycle',   'Cycle number',         SPV(0,'','u32'), {}],
     ]
-    # append application's PVs, defined in the pvDefs and create map of providers
+    # append application's PVs, defined in the pvDefs and create map of
+    #  providers
     if pvDefs is not None:
         C_.PVDefs += pvDefs
     _create_PVs(C_.PVDefs)
@@ -232,14 +273,28 @@ def get_externalPV(pvName:str, timeout=0.5):
     ctxt = Context('pva')
     return ctxt.get(pvName, timeout=timeout)
 
-def init_epicsdev(prefix:str, pvDefs:list, listDir:str, verbose:str=0):
+def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
+                serverStateChanged=None, listDir=None):
     """Check if no other server is running with the same prefix.
     Create PVs and return them as a dictionary.
+    prefix is a string to be prepended to all PV names.
+    pvDefs is a list of PV definitions (see create_PVs()).
+    verbose is the verbosity level for debug messages.
+    serverStateChanged is a function to be called when the server PV changes.
+    The function should have the signature:
+        def serverStateChanged(newStatus:str):
+    If serverStateChanged is None, then a dummy function is used.
     The listDir is a directory to save list of all generated PVs,
     if no directory is given, then </tmp/pvlist/><prefix> is assumed.
     """
+    if not isinstance(verbose, int) or verbose < 0:
+        printe('init_epicsdev arguments should be (prefix:str, pvDefs:list, verbose:int, listDir:str)')
+        sys.exit(1)
+    printi(f'Initializing epicsdev with prefix {prefix,verbose}')
     C_.prefix = prefix
     C_.verbose = verbose
+    if serverStateChanged is not None:
+        C_.serverStateChanged = serverStateChanged
     try:
         get_externalPV(prefix+'version')
         print(f'ERROR: Server for {prefix} already running. Exiting.')
@@ -286,19 +341,22 @@ if __name__ == "__main__":
     rng = np.random.default_rng(nPatterns)
     nPoints = 100
 
-    def set_recordLength(value):
-        """Record length have changed. The tAxis should be updated accordingly."""
+    def set_recordLength(value, *_):
+        """Record length have changed. The tAxis should be updated
+        accordingly."""
         printi(f'Setting tAxis to {value}')
         publish('tAxis', np.arange(value)*1.E-6)
         publish('recordLength', value)
-        set_noise(pvv('noiseLevel')) # Re-initialize noise array, because its size depends on recordLength
+        # Re-initialize noise array, because its size depends on recordLength
+        set_noise(pvv('noiseLevel'))
 
-    def set_noise(level):
+    def set_noise(level, *_):
         """Noise level have changed. Update noise array."""
         v = float(level)
         recordLength = pvv('recordLength')
         ts = timer()
-        pargs.noise = np.random.normal(scale=0.5*level, size=recordLength+nPatterns)# 45ms/1e6 points
+        pargs.noise = np.random.normal(scale=0.5*level,
+            size=recordLength+nPatterns)# 45ms/1e6 points
         printi(f'Noise array[{len(pargs.noise)}] updated with level {v:.4g} V. in {timer()-ts:.4g} S.')
         publish('noiseLevel', level)
 
@@ -325,8 +383,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = __doc__,
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     epilog=f'{__version__}')
-    parser.add_argument('-l', '--list', default='', nargs='?', help=
-'Directory to save list of all generated PVs, if no directory is given, then </tmp/pvlist/><prefix> is assumed.')
+    parser.add_argument('-l', '--list', default='', nargs='?', help=(
+'Directory to save list of all generated PVs, if no directory is given, '
+'then </tmp/pvlist/><prefix> is assumed.'))
     parser.add_argument('-p', '--prefix', default='epicsDev0:', help=
 'Prefix to be prepended to all PVs')
     # The rest of options are not essential, they can be controlled at runtime using PVs.
@@ -338,9 +397,10 @@ if __name__ == "__main__":
     print(pargs)
 
     # Initialize epicsdev and PVs
-    PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.list, pargs.verbose)
+    PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose, None, pargs.list)
 
-    # Initialize the device, using pargs if needed. That can be used to set the number of points in the waveform, for example.
+    # Initialize the device using pargs if needed. That can be used to set 
+    # the number of points in the waveform, for example.
     init(pargs.npoints)
 
     # Start the Server. Use your set_server, if needed.
