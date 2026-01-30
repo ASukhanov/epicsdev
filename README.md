@@ -23,3 +23,8 @@ python -m epicsdev.multiadc -c100 -n1000
 The GUI for monitoring:<br>
 ```python -m pypeto -c config -f multiadc```
 
+The graphs should look like this: 
+[control page](docs/epicsdev_pypet.png),
+[plots](docs/epicsdev_pvplot.jpg).
+
+
