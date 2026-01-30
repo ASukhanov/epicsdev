@@ -49,9 +49,9 @@ class PyPage():
         self.columns = {
             1: {'width': 120, 'justify': 'right'},
             2: {'width': 80},
-            3: {'width': 80},
+            3: {'width': 80, 'justify': 'right'},
             4: {'width': 80},
-            5: {'width': 80},
+            5: {'width': 80, 'justify': 'right'},
             6: {'width': 80},
             7: {'width': 80},
             8: {'width': 80},
@@ -73,13 +73,13 @@ string or device:parameter and the value is dictionary of the features.
         #FOption = ' -file '+logreqMap.get(D,'')
         #``````````mandatory member```````````````````````````````````````````
         self.rows = [
-['Device:', D, {D+'version':span(2,1)},_,_,_,_],
-['State:', D+'server','cycle:',D+'cycle',_,_,Plot], # 'Recall:', D+'setup',],
+['Device:', D, {D+'version':span(2,1)},_, 'host:', D+'host',_],
+['State:', D+'server', 'cycle:', D+'cycle',_,_, Plot], # 'Recall:', D+'setup',],
 ['Status:', {D+'status': span(8,1)}],
-['Polling Interval:', D+'polling','nPoints:',D+'recordLength',
-	'Noise:',D+'noiseLevel',_],
-[{'ATTRIBUTES':color('lightCyan')},
-	'Channels:','CH1','CH2','CH3','CH4','CH5','CH6'],
+['Polling Interval:', D+'polling', 'nPoints:', D+'recordLength',
+	'Noise:', D+'noiseLevel',_],
+[{'ATTRIBUTES':{**color('lightCyan'),**just(1)}},
+	'Channels:', 'CH1', 'CH2', 'CH3', 'CH4', 'CH5', 'CH6'],
 ['V/div:']+ChLine('VoltsPerDiv'),
 ['Mean:']+ChLine('Mean'),
 ['Peak2Peak:']+ChLine('Peak2Peak'),
