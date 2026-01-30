@@ -1,13 +1,14 @@
 """Skeleton and helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v2.0.0 26-01-28'# Many updates. SPV meta flag E changed to D for discrete (ENUM) PVs.
+__version__= 'v2.0.1 26-01-30'# added mandatory host PV
+#TODO add mandatory PV: host, to identify the server host.
 #Issue: There is no way in PVAccess to specify if string PV is writable.
 # As a workaround we append description with suffix ' Features: W' to indicate that.
 
 import sys
-import time
-from time import perf_counter as timer
+from time import time, sleep, strftime, perf_counter as timer
 import os
+from socket import gethostname
 from p4p.nt import NTScalar, NTEnum
 from p4p.nt.enum import ntenum
 from p4p.server import Server
@@ -34,7 +35,7 @@ def serverState():
     cached in C_ to avoid unnecessary get() calls."""
     return C_.serverState
 def _printTime():
-    return time.strftime("%m%d:%H%M%S")
+    return strftime("%m%d:%H%M%S")
 def printi(msg):
     """Print info message and publish it to status PV."""
     print(f'inf_@{_printTime()}: {msg}')
@@ -80,7 +81,7 @@ def publish(pvName:str, value, ifChanged=False, t=None):
         print(f'WARNING: PV {pvName} not found. Cannot publish value.')
         return
     if t is None:
-        t = time.time()
+        t = time()
     if not ifChanged or pv.current() != value:
         pv.post(value, timestamp=t)
 
@@ -126,7 +127,7 @@ def SPV(initial, meta='', vtype=None):
 
 #``````````````````create_PVs()```````````````````````````````````````````````
 def _create_PVs(pvDefs):
-    ts = time.time()
+    ts = time()
     for defs in pvDefs:
         try:
             pname,desc,spv,extra = defs
@@ -173,7 +174,7 @@ def _create_PVs(pvDefs):
         if spv.writable:
             @spv.put
             def handle(spv, op):
-                ct = time.time()
+                ct = time()
                 vv = op.value()
                 vr = vv.raw.value
                 current = spv._wrap(spv.current())
@@ -250,6 +251,7 @@ def create_PVs(pvDefs=None):
         'lowAlarmLimit', 'highAlarmLimit', etc."""
     U,LL,LH = 'units','limitLow','limitHigh'
     C_.PVDefs = [
+['host',    'Server host name',  SPV(gethostname()), {}],
 ['version', 'Program version',  SPV(__version__), {}],
 ['status',  'Server status. Features: RWE',    SPV('','W'), {}],
 ['server',  'Server control',
@@ -290,17 +292,18 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
     if not isinstance(verbose, int) or verbose < 0:
         printe('init_epicsdev arguments should be (prefix:str, pvDefs:list, verbose:int, listDir:str)')
         sys.exit(1)
-    printi(f'Initializing epicsdev with prefix {prefix,verbose}')
+    printi(f'Initializing epicsdev with prefix {prefix}')
     C_.prefix = prefix
     C_.verbose = verbose
-    if serverStateChanged is not None:
+    if serverStateChanged is not None:# set custom serverStateChanged function
         C_.serverStateChanged = serverStateChanged
-    try:
-        get_externalPV(prefix+'version')
-        print(f'ERROR: Server for {prefix} already running. Exiting.')
+    try: # check if server is already running
+        host = repr(get_externalPV(prefix+'host')).replace("'",'')
+        print(f'ERROR: Server for {prefix} already running at {host}. Exiting.')
         sys.exit(1)
-    except TimeoutError:
-        pass
+    except TimeoutError:    pass
+
+    # No existing server found. Creating PVs.
     pvs = create_PVs(pvDefs)
     # Save list of PVs to a file, if requested
     if listDir != '':
@@ -316,7 +319,6 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
 
 #``````````````````Demo````````````````````````````````````````````````````````
 if __name__ == "__main__":
-    print(f'epicsdev multiadc demo server {__version__}')
     import numpy as np
     import argparse
 
@@ -383,11 +385,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = __doc__,
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     epilog=f'{__version__}')
+    parser.add_argument('-d', '--device', default='epicsDev', help=
+'Device name, the PV name will be <device><index>:')
+    parser.add_argument('-i', '--index', default='0', help=
+'Device index, the PV name will be <device><index>:') 
     parser.add_argument('-l', '--list', default='', nargs='?', help=(
 'Directory to save list of all generated PVs, if no directory is given, '
 'then </tmp/pvlist/><prefix> is assumed.'))
-    parser.add_argument('-p', '--prefix', default='epicsDev0:', help=
-'Prefix to be prepended to all PVs')
     # The rest of options are not essential, they can be controlled at runtime using PVs.
     parser.add_argument('-n', '--npoints', type=int, default=nPoints, help=
 'Number of points in the waveform')
@@ -397,6 +401,7 @@ if __name__ == "__main__":
     print(pargs)
 
     # Initialize epicsdev and PVs
+    pargs.prefix = f'{pargs.device}{pargs.index}:'
     PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose, None, pargs.list)
 
     # Initialize the device using pargs if needed. That can be used to set 
@@ -415,5 +420,5 @@ if __name__ == "__main__":
             break
         if not state.startswith('Stop'):
             poll()
-        time.sleep(pvv("polling"))
+        sleep(pvv("polling"))
     printi('Server is exited')
