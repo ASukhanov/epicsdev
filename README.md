@@ -4,7 +4,7 @@ Helper module for creating EPICS PVAccess servers.
 Demo:
 ```
 python pip install epicsdev
-python -m epicsdev.epicsdev -l
+python -m epicsdev.epicsdev
 ```
 
 To control and plot:
