@@ -1,6 +1,6 @@
 """Simulated multi-channel ADC device server using epicsdev module."""
 # pylint: disable=invalid-name
-__version__= 'v0.0.2 26-01-23'# refactored, adjusted for epicdev 2.0.1
+__version__= 'v2.1.0 26-01-31'# updated for epicsdev v2.1.0
 
 import sys
 import time
@@ -9,7 +9,7 @@ import numpy as np
 import argparse
 
 from .epicsdev import  Server, Context, init_epicsdev, serverState, publish
-from .epicsdev import  pvv, printi, printv, SPV, set_server
+from .epicsdev import  pvv, printi, printv, SPV, set_server, sleep
 
 
 def myPVDefs():
@@ -17,6 +17,7 @@ def myPVDefs():
     SET,U,LL,LH = 'setter','units','limitLow','limitHigh'
     alarm = {'valueAlarm':{'lowAlarmLimit':-9., 'highAlarmLimit':9.}}
     pvDefs = [    # device-specific PVs
+['channels',    'Number of device channels',    SPV(pargs.channels), {}],
 ['externalControl', 'Name of external PV, which controls the server',
     SPV('Start Stop Clear Exit Started Stopped Exited'.split(), 'WD'), {}], 
 ['noiseLevel',  'Noise amplitude',  SPV(1.E-4,'W'), {SET:set_noise, U:'V'}],
@@ -48,7 +49,7 @@ nPatterns = 100 # number of waveform patterns.
 rng = np.random.default_rng(nPatterns)
 
 #``````````````````Setter functions for PVs```````````````````````````````````
-def set_recordLength(value):
+def set_recordLength(value, *_):
     """Record length have changed. The tAxis should be updated accordingly."""
     printi(f'Setting tAxis to {value}')
     publish('tAxis', np.arange(value)*1.E-6)
@@ -56,7 +57,7 @@ def set_recordLength(value):
     # Re-initialize noise array, because its size depends on recordLength
     set_noise(pvv('noiseLevel'))
 
-def set_noise(level):
+def set_noise(level, *_):
     """Noise level have changed. Update noise array."""
     v = float(level)
     recordLength = pvv('recordLength')
@@ -66,7 +67,7 @@ def set_noise(level):
     printi(f'Noise array[{len(pargs.noise)}] updated with level {v:.4g} V. in {timer()-ts:.4g} S.')
     publish('noiseLevel', level)
 
-def set_externalControl(value):
+def set_externalControl(value, *_):
     """External control PV have changed. Control the server accordingly."""
     pvname = str(value)
     if pvname in (None,'0'):
@@ -91,16 +92,12 @@ def serverStateChanged(newState:str):
         publish('cycle', 0)
 
 def init(recordLength):
-    """Testing function. Do not use in production code."""
+    """Device initialization function"""
     set_recordLength(recordLength)
     #set_externalControl(pargs.prefix + pargs.external)
 
 def poll():
-    """Example of polling function"""
-    #pattern = C_.cycle % nPatterns# produces sliding
-    cycle = pvv('cycle')
-    printv(f'cycle {repr(cycle)}')
-    publish('cycle', cycle + 1)
+    """Device polling function, called every cycle when server is running"""
     for ch in range(pargs.channels):
         pattern = rng.integers(0, nPatterns)
         chstr = f'c{ch+1:02}'
@@ -143,7 +140,6 @@ PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose,
 #     print('List of PVs:')
 #     for _pvname in PVs:
 #         print(_pvname)
-printi(f'Hosting {len(PVs)} PVs')
 
 # Initialize the device, using pargs if needed. 
 # That can be used to set the number of points in the waveform, for example.
@@ -154,12 +150,12 @@ set_server('Start')
 
 #``````````````````Main loop``````````````````````````````````````````````````
 server = Server(providers=[PVs])
-printi(f'Server started with polling interval {repr(pvv("polling"))} S.')
+printi(f'Server started. Sleeping per cycle: {repr(pvv("sleep"))} S.')
 while True:
     state = serverState()
     if state.startswith('Exit'):
         break
     if not state.startswith('Stop'):
         poll()
-    time.sleep(pvv("polling"))
+    sleep()
 printi('Server is exited')
