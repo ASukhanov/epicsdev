@@ -1,12 +1,13 @@
 """Skeleton and helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v2.0.1 26-01-30'# added mandatory host PV
+__version__= 'v2.1.0 26-01-31'# polling renamed to sleep. Sleep function added.
 #TODO add mandatory PV: host, to identify the server host.
 #Issue: There is no way in PVAccess to specify if string PV is writable.
 # As a workaround we append description with suffix ' Features: W' to indicate that.
 
 import sys
-from time import time, sleep, strftime, perf_counter as timer
+import time
+from time import perf_counter as timer
 import os
 from socket import gethostname
 from p4p.nt import NTScalar, NTEnum
@@ -14,6 +15,8 @@ from p4p.nt.enum import ntenum
 from p4p.server import Server
 from p4p.server.thread import SharedPV
 from p4p.client.thread import Context
+
+PeriodicUpdateInterval = 10. # seconds
 
 #``````````````````Module Storage`````````````````````````````````````````````
 def _serverStateChanged(newState:str):
@@ -28,6 +31,10 @@ class C_():
     PVs = {}
     PVDefs = [] 
     serverStateChanged = _serverStateChanged
+    lastCycleTime = time.time()
+    lastUpdateTime = 0.
+    cycleTimeSum = 0.
+    cyclesAfterUpdate = 0
 
 #```````````````````Helper methods````````````````````````````````````````````
 def serverState():
@@ -35,7 +42,7 @@ def serverState():
     cached in C_ to avoid unnecessary get() calls."""
     return C_.serverState
 def _printTime():
-    return strftime("%m%d:%H%M%S")
+    return time.strftime("%m%d:%H%M%S")
 def printi(msg):
     """Print info message and publish it to status PV."""
     print(f'inf_@{_printTime()}: {msg}')
@@ -81,7 +88,7 @@ def publish(pvName:str, value, ifChanged=False, t=None):
         print(f'WARNING: PV {pvName} not found. Cannot publish value.')
         return
     if t is None:
-        t = time()
+        t = time.time()
     if not ifChanged or pv.current() != value:
         pv.post(value, timestamp=t)
 
@@ -127,7 +134,7 @@ def SPV(initial, meta='', vtype=None):
 
 #``````````````````create_PVs()```````````````````````````````````````````````
 def _create_PVs(pvDefs):
-    ts = time()
+    ts = time.time()
     for defs in pvDefs:
         try:
             pname,desc,spv,extra = defs
@@ -174,7 +181,7 @@ def _create_PVs(pvDefs):
         if spv.writable:
             @spv.put
             def handle(spv, op):
-                ct = time()
+                ct = time.time()
                 vv = op.value()
                 vr = vv.raw.value
                 current = spv._wrap(spv.current())
@@ -259,8 +266,12 @@ def create_PVs(pvDefs=None):
         {'setter':set_server}],
 ['verbose', 'Debugging verbosity', SPV(C_.verbose,'W','u8'),
         {'setter':set_verbose, LL:0,LH:3}],
-['polling', 'Polling interval', SPV(1.0,'W'), {U:'S', LL:0.001, LH:10.1}],
-['cycle',   'Cycle number',         SPV(0,'','u32'), {}],
+['sleep', 'Pause in the main loop, it could be useful for throttling the data output',
+    SPV(1.0,'W'), {U:'S', LL:0.001, LH:10.1}],
+['cycle',   'Cycle number, published every {PeriodicUpdateInterval} S.',
+    SPV(0,'','u32'), {}],
+['cycleTime','Average cycle time including sleep, published every {PeriodicUpdateInterval} S',
+    SPV(0.), {U:'S'}],
     ]
     # append application's PVs, defined in the pvDefs and create map of
     #  providers
@@ -301,7 +312,8 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
         host = repr(get_externalPV(prefix+'host')).replace("'",'')
         print(f'ERROR: Server for {prefix} already running at {host}. Exiting.')
         sys.exit(1)
-    except TimeoutError:    pass
+    except TimeoutError:
+        pass
 
     # No existing server found. Creating PVs.
     pvs = create_PVs(pvDefs)
@@ -315,7 +327,27 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
         with open(filepath, 'w', encoding="utf-8") as f:
             for _pvname in pvs:
                 f.write(_pvname + '\n')
+    printi(f'Hosting {len(pvs)} PVs')
     return pvs
+
+def sleep():
+    """Sleep function to be called in the main loop. It updates cycleTime PV
+    and sleeps for the time specified in sleep PV."""
+    tnow = time.time()
+    C_.cycleTimeSum += tnow - C_.lastCycleTime
+    C_.lastCycleTime = tnow
+    C_.cyclesAfterUpdate += 1
+    C_.cycle += 1
+    printv(f'cycle {C_.cycle}')
+    if tnow - C_.lastUpdateTime > PeriodicUpdateInterval:
+        avgCycleTime = C_.cycleTimeSum / C_.cyclesAfterUpdate
+        printv(f'Average cycle time: {avgCycleTime:.6f} S.')
+        publish('cycle', C_.cycle)
+        publish('cycleTime', avgCycleTime)
+        C_.lastUpdateTime = tnow
+        C_.cycleTimeSum = 0.
+        C_.cyclesAfterUpdate = 0
+    time.sleep(pvv('sleep'))
 
 #``````````````````Demo````````````````````````````````````````````````````````
 if __name__ == "__main__":
@@ -331,11 +363,11 @@ if __name__ == "__main__":
 ['tAxis',       'Full scale of horizontal axis', SPV([0.]), {U:'S'}],
 ['recordLength','Max number of points',     SPV(100,'W','u32'),
     {LL:4,LH:1000000, SET:set_recordLength}],
-['ch1Offset',   'Offset',  SPV(0.,'W'), {U:'du'}],
-['ch1VoltsPerDiv',  'Vertical scale',       SPV(1E-3,'W'), {U:'V/du'}],
-['ch1Waveform', 'Waveform array',           SPV([0.]), {U:'du'}],
-['ch1Mean',     'Mean of the waveform',     SPV(0.,'A'), {U:'du'}],
-['ch1Peak2Peak','Peak-to-peak amplitude',   SPV(0.,'A'), {U:'du',**alarm}],
+['c01Offset',   'Offset',  SPV(0.,'W'), {U:'du'}],
+['c01VoltsPerDiv',  'Vertical scale',       SPV(1E-3,'W'), {U:'V/du'}],
+['c01Waveform', 'Waveform array',           SPV([0.]), {U:'du'}],
+['c01Mean',     'Mean of the waveform',     SPV(0.,'A'), {U:'du'}],
+['c01Peak2Peak','Peak-to-peak amplitude',   SPV(0.,'A'), {U:'du',**alarm}],
 ['alarm',       'PV with alarm',            SPV(0,'WA'), {U:'du',**alarm}],
         ]
     nPatterns = 100 # number of waveform patterns.
@@ -363,23 +395,20 @@ if __name__ == "__main__":
         publish('noiseLevel', level)
 
     def init(recordLength):
-        """Testing function. Do not use in production code."""
+        """Example of device initialization function"""
         set_recordLength(recordLength)
         #set_noise(pvv('noiseLevel')) # already called from set_recordLength
 
     def poll():
-        """Example of polling function"""
+        """Example of polling function. Called every cycle when server is running."""
         #pattern = C_.cycle % nPatterns# produces sliding
         pattern = rng.integers(0, nPatterns)
-        cycle = pvv('cycle')
-        printv(f'cycle {repr(cycle)}')
-        publish('cycle', cycle + 1)
         wf = pargs.noise[pattern:pattern+pvv('recordLength')].copy()
-        wf /= pvv('ch1VoltsPerDiv')
-        wf += pvv('ch1Offset')
-        publish('ch1Waveform', wf)
-        publish('ch1Peak2Peak', np.ptp(wf))
-        publish('ch1Mean', np.mean(wf))
+        wf /= pvv('c01VoltsPerDiv')
+        wf += pvv('c01Offset')
+        publish('c01Waveform', wf)
+        publish('c01Peak2Peak', np.ptp(wf))
+        publish('c01Mean', np.mean(wf))
 
     # Argument parsing
     parser = argparse.ArgumentParser(description = __doc__,
@@ -389,7 +418,7 @@ if __name__ == "__main__":
 'Device name, the PV name will be <device><index>:')
     parser.add_argument('-i', '--index', default='0', help=
 'Device index, the PV name will be <device><index>:') 
-    parser.add_argument('-l', '--list', default='', nargs='?', help=(
+    parser.add_argument('-l', '--list', nargs='?', help=(
 'Directory to save list of all generated PVs, if no directory is given, '
 'then </tmp/pvlist/><prefix> is assumed.'))
     # The rest of options are not essential, they can be controlled at runtime using PVs.
@@ -413,12 +442,12 @@ if __name__ == "__main__":
 
     # Main loop
     server = Server(providers=[PVs])
-    printi(f'Server started with polling interval {repr(pvv("polling"))} S.')
+    printi(f'Server started. Sleeping per cycle: {repr(pvv("sleep"))} S.')
     while True:
         state = serverState()
         if state.startswith('Exit'):
             break
         if not state.startswith('Stop'):
             poll()
-        sleep(pvv("polling"))
+        sleep()
     printi('Server is exited')
