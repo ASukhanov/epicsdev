@@ -1,7 +1,10 @@
-"""Pypet page for epicdev.epicsdev module"""
-# format: pypeto 1.2+
-__version__ = 'v0.0.1 2026-01-16'# 
-print(f'epicsScope {__version__}')
+"""Pypet page for epicdev.epicsdev.
+Device instance is configured via environment variable EPICSDEV,
+default instance is epicsdev0:."""
+# pylint: disable=invalid-name
+__version__ = 'v0.1.0 2026-01-31'#
+
+import os
 
 #``````````````````Definitions````````````````````````````````````````````````
 # python expressions and functions, used in the spreadsheet
@@ -18,28 +21,27 @@ LargeFont = {'color':'light gray', **font(18), 'fgColor':'dark green'}
 ButtonFont = {'font':['Open Sans Extrabold',14]}# Comic Sans MS
 LYRow = {'ATTRIBUTES':{'color':'light yellow'}}
 lColor = color('lightGreen')
-
-# definition for plotting cell
 PyPath = 'python -m'
-PaneP2P = ' '.join([f'ch{i+1:01d}Mean ch{i+1:01d}Peak2Peak' for i in range(1)])
-PaneWF = ' '.join([f'ch{i+1:01d}Waveform' for i in range(1)])
-#PaneT = 'timing[1] timing[3]'
-Plot = {'Plot':{'launch':
-  f'{PyPath} pvplot Y-5:5 -aV:epicsDev0: -#0"{PaneP2P}" -#1"{PaneWF}"',# -#2"{PaneT}"',
-  **lColor, **ButtonFont}}
-print(f'Plot command: {Plot}')
+
+try:
+    Instance = f"epicsDev{os.environ['EPICSDEV']}:"
+except KeyError:
+    Instance = 'epicsDev0:'
+
 #``````````````````PyPage Object``````````````````````````````````````````````
 class PyPage():
-    def __init__(self, instance='epicsDev0:',
-            title="Simulated oscilloscope", channels=1):
+    def __init__(self, instance=None,
+            title="epicsdev", channels=1):
         """instance: unique name of the page.
         For EPICS it is usually device prefix 
         """
+        if instance is None:
+            instance = Instance
         print(f'Instantiating Page {instance,title} with {channels} channels')
 
         #``````````Mandatory class members starts here````````````````````````
         self.namespace = 'PVA'
-        self.title = title
+        self.title = instance[:-1]
 
         #``````````Page attributes, optional`````````````````````````
         self.page = {**color(240,240,240)}
@@ -69,15 +71,20 @@ string or device:parameter and the value is dictionary of the features.
 
         #``````````Abbreviations, used in cell definitions
         def ChLine(suffix):
-            return [f'{D}ch{ch+1:01d}{suffix}' for ch in range(channels)]
-        #FOption = ' -file '+logreqMap.get(D,'')
+            return [f'{D}c{ch+1:02d}{suffix}' for ch in range(channels)]
+        PaneP2P = ' '.join([f'c{i+1:02d}Mean c{i+1:02d}Peak2Peak' for i in range(channels)])
+        PaneWF = ' '.join([f'c{i+1:02d}Waveform' for i in range(channels)])
+        #PaneT = 'timing[1] timing[3]'
+        Plot = {'Plot':{'launch':
+          f'{PyPath} pvplot Y-5:5 -aV:{instance} -#0"{PaneP2P}" -#1"{PaneWF}"',# -#2"{PaneT}"',
+          **lColor, **ButtonFont}}
+        print(f'Plot command: {Plot}')
         #``````````mandatory member```````````````````````````````````````````
         self.rows = [
-['Device:', D, {D+'version':span(2,1)},_, 'host:', D+'host',_],
-['State:', D+'server', 'cycle:', D+'cycle',_,_, Plot], # 'Recall:', D+'setup',],
+['Device:',D, D+'server', D+'version', 'host:',D+'host',_],
 ['Status:', {D+'status': span(8,1)}],
-['Polling Interval:', D+'polling', 'nPoints:', D+'recordLength',
-	'Noise:', D+'noiseLevel',_],
+['Cycle time:',D+'cycleTime', 'Sleep:',D+'sleep', 'Cycle:',D+'cycle', Plot],
+['nPoints:',D+'recordLength','Noise:',D+'noiseLevel',_,_,_],
 [{'ATTRIBUTES':{**color('lightCyan'),**just(1)}},
 	'Channels:', 'CH1', 'CH2', 'CH3', 'CH4', 'CH5', 'CH6'],
 ['V/div:']+ChLine('VoltsPerDiv'),
