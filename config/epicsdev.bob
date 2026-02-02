@@ -136,4 +136,75 @@
       </trace>
     </traces>
   </widget>
+  <widget type="textentry" version="3.0.0">
+    <name>Record_length</name>
+    <pv_name>pva://epicsDev0:recordLength</pv_name>
+    <x>580</x>
+    <y>71</y>
+    <precision>0</precision>
+  </widget>
+  <widget type="label" version="2.0.0">
+    <name>Label_1</name>
+    <text>Record length</text>
+    <x>580</x>
+    <y>50</y>
+  </widget>
+  <widget type="textentry" version="3.0.0">
+    <name>Noise</name>
+    <pv_name>pva://epicsDev0:noiseLevel</pv_name>
+    <x>580</x>
+    <y>120</y>
+  </widget>
+  <widget type="label" version="2.0.0">
+    <name>Label_2</name>
+    <text>Noise level</text>
+    <x>580</x>
+    <y>100</y>
+  </widget>
+  <widget type="label" version="2.0.0">
+    <name>Label_3</name>
+    <text>Volt/div</text>
+    <x>580</x>
+    <y>150</y>
+  </widget>
+  <widget type="textentry" version="3.0.0">
+    <name>Volts/div</name>
+    <pv_name>pva://epicsDev0:c02VoltsPerDiv</pv_name>
+    <x>580</x>
+    <y>170</y>
+  </widget>
+  <widget type="textentry" version="3.0.0">
+    <name>Sleep</name>
+    <pv_name>pva://epicsDev0:sleep</pv_name>
+    <x>580</x>
+    <y>220</y>
+    <precision>1</precision>
+  </widget>
+  <widget type="label" version="2.0.0">
+    <name>Label_4</name>
+    <text>Sleep</text>
+    <x>580</x>
+    <y>200</y>
+  </widget>
+  <widget type="textentry" version="3.0.0">
+    <name>Cycle time</name>
+    <pv_name>pva://epicsDev0:cycleTime</pv_name>
+    <x>580</x>
+    <y>240</y>
+  </widget>
+  <widget type="textentry" version="3.0.0">
+    <name>Cycle</name>
+    <pv_name>pva://epicsDev0:cycle</pv_name>
+    <x>620</x>
+    <y>10</y>
+    <width>60</width>
+    <precision>0</precision>
+  </widget>
+  <widget type="label" version="2.0.0">
+    <name>Label_6</name>
+    <text>Cycle</text>
+    <x>579</x>
+    <y>10</y>
+    <width>40</width>
+  </widget>
 </display>
