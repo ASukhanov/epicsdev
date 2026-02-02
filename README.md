@@ -27,5 +27,4 @@ The graphs should look like this:
 [control page](docs/epicsdev_pypet.png),
 [plots](docs/epicsdev_pvplot.jpg).
 
-Phoebus display config file is config/epicsdev.bob.
-[phoebus](docs/phoebus_epicsdev.jpg)
+[Phoebus display](docs/phoebus_epicsdev.jpg) defined in config/epicsdev.bob.
