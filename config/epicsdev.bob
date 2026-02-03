@@ -7,7 +7,7 @@
     <width>550</width>
     <height>290</height>
     <x_axis>
-      <title>X</title>
+      <title>ADC Sample</title>
       <autoscale>true</autoscale>
       <log_scale>false</log_scale>
       <minimum>0.0</minimum>
@@ -25,7 +25,7 @@
     </x_axis>
     <y_axes>
       <y_axis>
-        <title>Y</title>
+        <title>Scope divisions</title>
         <autoscale>true</autoscale>
         <log_scale>false</log_scale>
         <minimum>0.0</minimum>
@@ -92,7 +92,7 @@
     <width>550</width>
     <y_axes>
       <y_axis>
-        <title>Y</title>
+        <title>Volts</title>
         <autoscale>true</autoscale>
         <log_scale>false</log_scale>
         <minimum>0.0</minimum>
@@ -148,28 +148,32 @@
     <text>Record length</text>
     <x>580</x>
     <y>50</y>
+    <horizontal_alignment>1</horizontal_alignment>
   </widget>
   <widget type="textentry" version="3.0.0">
     <name>Noise</name>
     <pv_name>pva://epicsDev0:noiseLevel</pv_name>
     <x>580</x>
     <y>120</y>
+    <precision>6</precision>
   </widget>
   <widget type="label" version="2.0.0">
     <name>Label_2</name>
     <text>Noise level</text>
     <x>580</x>
     <y>100</y>
+    <horizontal_alignment>1</horizontal_alignment>
   </widget>
   <widget type="label" version="2.0.0">
     <name>Label_3</name>
-    <text>Volt/div</text>
+    <text>Volts/div</text>
     <x>580</x>
     <y>150</y>
+    <horizontal_alignment>1</horizontal_alignment>
   </widget>
   <widget type="textentry" version="3.0.0">
     <name>Volts/div</name>
-    <pv_name>pva://epicsDev0:c02VoltsPerDiv</pv_name>
+    <pv_name>pva://epicsDev0:c01VoltsPerDiv</pv_name>
     <x>580</x>
     <y>170</y>
   </widget>
@@ -185,6 +189,7 @@
     <text>Sleep</text>
     <x>580</x>
     <y>200</y>
+    <horizontal_alignment>1</horizontal_alignment>
   </widget>
   <widget type="textentry" version="3.0.0">
     <name>Cycle time</name>
