@@ -1,12 +1,11 @@
 """Simulated multi-channel ADC device server using epicsdev module."""
 # pylint: disable=invalid-name
-__version__= 'v2.1.0 26-01-31'# updated for epicsdev v2.1.0
+__version__= 'v2.1.1 26-02-04'# added timing, throughput and c0$VoltOffset PVs
 
 import sys
-import time
 from time import perf_counter as timer
-import numpy as np
 import argparse
+import numpy as np
 
 from .epicsdev import  Server, Context, init_epicsdev, serverState, publish
 from .epicsdev import  pvv, printi, printv, SPV, set_server, sleep
@@ -20,17 +19,20 @@ def myPVDefs():
 ['channels',    'Number of device channels',    SPV(pargs.channels), {}],
 ['externalControl', 'Name of external PV, which controls the server',
     SPV('Start Stop Clear Exit Started Stopped Exited'.split(), 'WD'), {}], 
-['noiseLevel',  'Noise amplitude',  SPV(1.E-4,'W'), {SET:set_noise, U:'V'}],
+['noiseLevel',  'Noise amplitude',  SPV(0.05,'W'), {U:'V'}],
 ['tAxis',       'Full scale of horizontal axis', SPV([0.]), {U:'S'}],
 ['recordLength','Max number of points',     SPV(100,'W','u32'),
     {LL:4,LH:1000000, SET:set_recordLength}],
 ['alarm',       'PV with alarm',            SPV(0,'WA'), {U:'du',**alarm}],
+#``````````````````Auxiliary PVs
+['timing',  'Elapsed time for waveform generation, publishing, total]', SPV([0.]), {U:'S'}],
+['throughput', 'Total number of points processed per second', SPV(0.), {U:'Mpts/s'}],
     ]
 
     # Templates for channel-related PVs. Important: SPV cannot be used in this list!
     ChannelTemplates = [
-['c0$VoltsPerDiv',  'Vertical scale',       (1E-3,'W'), {U:'V/du'}],
-#['c0$VoltOffset',  'Vertical offset',       (1E-3,), {U:'V/du'}],
+['c0$VoltsPerDiv',  'Vertical scale',       (0.1,'W'), {U:'V/du'}],
+['c0$VoltOffset',  'Vertical offset',       (0.,'W'), {U:'V'}],
 ['c0$Waveform', 'Waveform array',           ([0.],), {U:'du'}],
 ['c0$Mean',     'Mean of the waveform',     (0.,'A'), {U:'du'}],
 ['c0$Peak2Peak','Peak-to-peak amplitude',   (0.,'A'), {U:'du',**alarm}],
@@ -44,9 +46,11 @@ def myPVDefs():
             pvDefs.append(newpvdef)
     return pvDefs
 
-#``````````````````Module constants
-nPatterns = 100 # number of waveform patterns.
-rng = np.random.default_rng(nPatterns)
+#``````````````````Module attributes
+rng = np.random.default_rng()
+ElapsedTime = {'waveform': 0., 'publish': 0., 'poll': 0.}
+class C_():
+    cyclesSinceUpdate = 0
 
 #``````````````````Setter functions for PVs```````````````````````````````````
 def set_recordLength(value, *_):
@@ -54,18 +58,6 @@ def set_recordLength(value, *_):
     printi(f'Setting tAxis to {value}')
     publish('tAxis', np.arange(value)*1.E-6)
     publish('recordLength', value)
-    # Re-initialize noise array, because its size depends on recordLength
-    set_noise(pvv('noiseLevel'))
-
-def set_noise(level, *_):
-    """Noise level have changed. Update noise array."""
-    v = float(level)
-    recordLength = pvv('recordLength')
-    ts = timer()
-
-    pargs.noise = np.random.normal(scale=0.5*level, size=recordLength+nPatterns)# 45ms/1e6 points
-    printi(f'Noise array[{len(pargs.noise)}] updated with level {v:.4g} V. in {timer()-ts:.4g} S.')
-    publish('noiseLevel', level)
 
 def set_externalControl(value, *_):
     """External control PV have changed. Control the server accordingly."""
@@ -94,21 +86,42 @@ def serverStateChanged(newState:str):
 def init(recordLength):
     """Device initialization function"""
     set_recordLength(recordLength)
+    # Set offset of each channel = channel index
+    for ch in range(pargs.channels):
+        publish(f'c{ch+1:02}VoltOffset', ch)
     #set_externalControl(pargs.prefix + pargs.external)
 
 def poll():
     """Device polling function, called every cycle when server is running"""
+    C_.cyclesSinceUpdate += 1
+    ts0 = timer()
     for ch in range(pargs.channels):
-        pattern = rng.integers(0, nPatterns)
+        ts1 = timer()
         chstr = f'c{ch+1:02}'
-        wf = pargs.noise[pattern:pattern+pvv('recordLength')].copy()
-        #print(f'ch{ch}, {pattern}: {wf[0], wf.sum(), wf.mean(), np.mean(wf)}')
-        wf /= pvv(f'{chstr}VoltsPerDiv')
-        #wf += pvv(f'{chstr}Offset')
-        wf += ch
-        publish(f'{chstr}Waveform', list(wf))
+        rwf = rng.random(pvv('recordLength'))*pvv('noiseLevel')
+        wf = rwf/pvv(f'{chstr}VoltsPerDiv') + pvv(f'{chstr}VoltOffset')# the time is comparable with rng.random
+        ts2 = timer()
+        ElapsedTime['waveform'] += ts2 - ts1
+        #print(f'ElapsedTime: {C_.cyclesSinceUpdate, ElapsedTime["waveform"]}')
+        publish(f'{chstr}Waveform', wf)
         publish(f'{chstr}Peak2Peak', np.ptp(wf))
         publish(f'{chstr}Mean', np.mean(wf))
+        ElapsedTime['publish'] += timer() - ts2
+    ElapsedTime['poll'] += timer() - ts0
+
+def periodic_update():
+    """Perform periodic update"""
+    #printi(f'periodic update for {C_.cyclesSinceUpdate} cycles: {ElapsedTime}')
+    times = [(round(i/C_.cyclesSinceUpdate,6)) for i in ElapsedTime.values()]
+    publish('timing', times)
+    C_.cyclesSinceUpdate = 0
+    for key in ElapsedTime:
+        ElapsedTime[key] = 0.
+    pointsPerSecond = len(pvv('tAxis'))/(pvv('cycleTime')-pvv('sleep'))/1.E6
+    pointsPerSecond *= pvv('channels')
+    publish('throughput', round(pointsPerSecond,6))
+    printv(f'periodic update. Performance: {pointsPerSecond:.3g} Mpts/s')
+
 
 # Argument parsing
 parser = argparse.ArgumentParser(description = __doc__,
@@ -136,10 +149,6 @@ print(f'pargs: {pargs}')
 pargs.prefix = f'{pargs.device}{pargs.index}:'
 PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose,
                     serverStateChanged, pargs.list)
-# if pargs.list != '':
-#     print('List of PVs:')
-#     for _pvname in PVs:
-#         print(_pvname)
 
 # Initialize the device, using pargs if needed. 
 # That can be used to set the number of points in the waveform, for example.
@@ -157,5 +166,6 @@ while True:
         break
     if not state.startswith('Stop'):
         poll()
-    sleep()
-printi('Server is exited')
+    if not sleep():
+        periodic_update()
+printi('Server has exited')
