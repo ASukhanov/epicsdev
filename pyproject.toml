@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "epicsdev"
-version = "2.1.0"
+version = "2.1.1"
 authors = [
   { name="Andrey Sukhanov", email="sukhanov@bnl.gov" },
 ]

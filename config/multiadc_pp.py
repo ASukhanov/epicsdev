@@ -18,7 +18,7 @@ def slider(minValue,maxValue):
     return {'widget':'hslider','opLimits':[minValue,maxValue],'span':[2,1]}
 
 LargeFont = {'color':'light gray', **font(18), 'fgColor':'dark green'}
-ButtonFont = {'font':['Open Sans Extrabold',14]}# Comic Sans MS
+ButtonFont = {'font':['Open Sans Bold,14']}# Comic Sans MS
 LYRow = {'ATTRIBUTES':{'color':'light yellow'}}
 lColor = color('lightGreen')
 PyPath = 'python -m'
@@ -75,20 +75,25 @@ string or device:parameter and the value is dictionary of the features.
         PaneP2P = ' '.join([f'c{i+1:02d}Mean c{i+1:02d}Peak2Peak' for i in range(channels)])
         PaneWF = ' '.join([f'c{i+1:02d}Waveform' for i in range(channels)])
         #PaneT = 'timing[1] timing[3]'
-        Plot = {'Plot':{'launch':
+        Plot = {'Plot Channels':{'launch':
           f'{PyPath} pvplot Y-5:5 -aV:{instance} -#0"{PaneP2P}" -#1"{PaneWF}"',# -#2"{PaneT}"',
           **lColor, **ButtonFont}}
-        print(f'Plot command: {Plot}')
+        print(f'Plot button: {Plot}')
+        Timing = {'Plot':{'launch':f'{PyPath} pvplot -aV:{instance}timing "[0] [1] [2]"', **lColor}}
+        print(f'Timing button: {Timing}')
         #``````````mandatory member```````````````````````````````````````````
         self.rows = [
-['Device:',D, D+'server', D+'version', 'host:',D+'host',_],
+['Device:',D, D+'server', {D+'channels':just(2)},'chnls, host:',D+'host',D+'version'],
 ['Status:', {D+'status': span(8,1)}],
-['Cycle time:',D+'cycleTime', 'Sleep:',D+'sleep', 'Cycle:',D+'cycle', Plot],
-['nPoints:',D+'recordLength','Noise:',D+'noiseLevel', 'Channels:',D+'channels',_],
+['Cycle time:',D+'cycleTime', 'Sleep:',D+'sleep', 'Cycle:',D+'cycle'],
+['nPoints:',D+'recordLength','Noise:',D+'noiseLevel',
+    'Throughput:',D+'throughput',Timing],
 [{'ATTRIBUTES':{**color('lightCyan'),**just(1)}},
-    'Channels:','CH1','CH2','CH3','CH4','CH5','CH6'],
+    Plot,'CH1','CH2','CH3','CH4','CH5','CH6'],
 ['V/div:']+ChLine('VoltsPerDiv'),
+['VoltOffset:']+ChLine('VoltOffset'),
 ['Mean:']+ChLine('Mean'),
 ['Peak2Peak:']+ChLine('Peak2Peak'),
 #['Waveform:']+ChLine('Waveform'),
+['Timing:',{D+'timing':span(3,1)}],
         ]
