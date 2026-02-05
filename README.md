@@ -16,7 +16,7 @@ python -m pypeto -c config -f epicsdev
 ## Multi-channel waveform generator
 Module **epicdev.multiadc** can generate large amount of data for stress-testing
 the EPICS environment. For example the following command will generate 10000 of 
-100-pont noisy waveforms and 40000 of scalar parameters per second.
+100-point noisy waveforms and 40000 of scalar parameters per second.
 ```
 python -m epicsdev.multiadc -s0.1 -c10000 -n100
 ```
