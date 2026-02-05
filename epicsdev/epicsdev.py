@@ -1,7 +1,6 @@
 """Skeleton and helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v2.1.0 26-01-31'# polling renamed to sleep. Sleep function added.
-#TODO add mandatory PV: host, to identify the server host.
+__version__= 'v2.1.1 26-02-05'# sleep() returns False if a periodic update occurred. Simplified waveform randomization.
 #Issue: There is no way in PVAccess to specify if string PV is writable.
 # As a workaround we append description with suffix ' Features: W' to indicate that.
 
@@ -31,7 +30,7 @@ class C_():
     PVs = {}
     PVDefs = [] 
     serverStateChanged = _serverStateChanged
-    lastCycleTime = time.time()
+    lastCycleTime = timer()
     lastUpdateTime = 0.
     cycleTimeSum = 0.
     cyclesAfterUpdate = 0
@@ -332,13 +331,17 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
 
 def sleep():
     """Sleep function to be called in the main loop. It updates cycleTime PV
-    and sleeps for the time specified in sleep PV."""
-    tnow = time.time()
+    and sleeps for the time specified in sleep PV.
+    Returns False if a periodic update occurred.
+    """
+    time.sleep(pvv('sleep'))
+    tnow = timer()
     C_.cycleTimeSum += tnow - C_.lastCycleTime
     C_.lastCycleTime = tnow
     C_.cyclesAfterUpdate += 1
     C_.cycle += 1
     printv(f'cycle {C_.cycle}')
+    sleeping = True
     if tnow - C_.lastUpdateTime > PeriodicUpdateInterval:
         avgCycleTime = C_.cycleTimeSum / C_.cyclesAfterUpdate
         printv(f'Average cycle time: {avgCycleTime:.6f} S.')
@@ -347,7 +350,8 @@ def sleep():
         C_.lastUpdateTime = tnow
         C_.cycleTimeSum = 0.
         C_.cyclesAfterUpdate = 0
-    time.sleep(pvv('sleep'))
+        sleeping = False
+    return sleeping
 
 #``````````````````Demo````````````````````````````````````````````````````````
 if __name__ == "__main__":
@@ -359,20 +363,20 @@ if __name__ == "__main__":
         SET,U,LL,LH = 'setter','units','limitLow','limitHigh'
         alarm = {'valueAlarm':{'lowAlarmLimit':-9., 'highAlarmLimit':9.}}
         return [    # device-specific PVs
-['noiseLevel',  'Noise amplitude',  SPV(1.E-6,'W'), {SET:set_noise, U:'V'}],
+['noiseLevel',  'Noise amplitude',  SPV(1.,'W'), {U:'V'}],
 ['tAxis',       'Full scale of horizontal axis', SPV([0.]), {U:'S'}],
 ['recordLength','Max number of points',     SPV(100,'W','u32'),
     {LL:4,LH:1000000, SET:set_recordLength}],
+['throughput', 'Performance metrics, points per second', SPV(0.), {U:'Mpts/s'}],
 ['c01Offset',   'Offset',  SPV(0.,'W'), {U:'du'}],
-['c01VoltsPerDiv',  'Vertical scale',       SPV(1E-3,'W'), {U:'V/du'}],
+['c01VoltsPerDiv',  'Vertical scale',       SPV(0.1,'W'), {U:'V/du'}],
 ['c01Waveform', 'Waveform array',           SPV([0.]), {U:'du'}],
 ['c01Mean',     'Mean of the waveform',     SPV(0.,'A'), {U:'du'}],
 ['c01Peak2Peak','Peak-to-peak amplitude',   SPV(0.,'A'), {U:'du',**alarm}],
 ['alarm',       'PV with alarm',            SPV(0,'WA'), {U:'du',**alarm}],
         ]
-    nPatterns = 100 # number of waveform patterns.
     pargs = None
-    rng = np.random.default_rng(nPatterns)
+    rng = np.random.default_rng()
     nPoints = 100
 
     def set_recordLength(value, *_):
@@ -381,18 +385,6 @@ if __name__ == "__main__":
         printi(f'Setting tAxis to {value}')
         publish('tAxis', np.arange(value)*1.E-6)
         publish('recordLength', value)
-        # Re-initialize noise array, because its size depends on recordLength
-        set_noise(pvv('noiseLevel'))
-
-    def set_noise(level, *_):
-        """Noise level have changed. Update noise array."""
-        v = float(level)
-        recordLength = pvv('recordLength')
-        ts = timer()
-        pargs.noise = np.random.normal(scale=0.5*level,
-            size=recordLength+nPatterns)# 45ms/1e6 points
-        printi(f'Noise array[{len(pargs.noise)}] updated with level {v:.4g} V. in {timer()-ts:.4g} S.')
-        publish('noiseLevel', level)
 
     def init(recordLength):
         """Example of device initialization function"""
@@ -401,14 +393,15 @@ if __name__ == "__main__":
 
     def poll():
         """Example of polling function. Called every cycle when server is running."""
-        #pattern = C_.cycle % nPatterns# produces sliding
-        pattern = rng.integers(0, nPatterns)
-        wf = pargs.noise[pattern:pattern+pvv('recordLength')].copy()
+        #ts = timer()
+        wf = rng.random(pvv('recordLength'))*pvv('noiseLevel')# it takes 5ms for 1M points
         wf /= pvv('c01VoltsPerDiv')
         wf += pvv('c01Offset')
+        #print(f'Waveform updated in {timer()-ts:.6g} S.')
         publish('c01Waveform', wf)
         publish('c01Peak2Peak', np.ptp(wf))
         publish('c01Mean', np.mean(wf))
+        #print(f'Polling completed in {timer()-ts:.6g} S.')
 
     # Argument parsing
     parser = argparse.ArgumentParser(description = __doc__,
@@ -449,5 +442,9 @@ if __name__ == "__main__":
             break
         if not state.startswith('Stop'):
             poll()
-        sleep()
+        if not sleep():# Sleep and update performance metrics periodically
+            if not state.startswith('Stop'):
+                pointsPerSecond = len(pvv('c01Waveform'))/(pvv('cycleTime')-pvv('sleep'))/1.E6
+                publish('throughput', round(pointsPerSecond,6))
+                printv(f'periodic update. Performance: {pointsPerSecond:.3g} Mpts/s')
     printi('Server is exited')
