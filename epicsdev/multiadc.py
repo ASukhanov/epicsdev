@@ -90,6 +90,7 @@ def init(recordLength):
     for ch in range(pargs.channels):
         publish(f'c{ch+1:02}VoltOffset', ch)
     #set_externalControl(pargs.prefix + pargs.external)
+    publish('sleep', pargs.sleep)
 
 def poll():
     """Device polling function, called every cycle when server is running"""
@@ -140,6 +141,8 @@ parser.add_argument('-i', '--index', default='0', help=
 # The rest of arguments are not essential, they can be changed at runtime using PVs.
 parser.add_argument('-n', '--npoints', type=int, default=100, help=
 'Number of points in the waveform')
+parser.add_argument('-s', '--sleep', type=float, default=1.0, help=
+'Sleep time per cycle')
 parser.add_argument('-v', '--verbose', action='count', default=0, help=
 'Show more log messages (-vv: show even more)') 
 pargs = parser.parse_args()
@@ -159,7 +162,7 @@ set_server('Start')
 
 #``````````````````Main loop``````````````````````````````````````````````````
 server = Server(providers=[PVs])
-printi(f'Server started. Sleeping per cycle: {repr(pvv("sleep"))} S.')
+printi(f'Server started. Sleeping per cycle: {float(pvv("sleep")):.3f} S.')
 while True:
     state = serverState()
     if state.startswith('Exit'):
