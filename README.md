@@ -28,3 +28,16 @@ The graphs should look like this:
 [plots](docs/epicsdev_pvplot.jpg).
 
 Example of [Phoebus display](docs/phoebus_epicsdev.jpg), as defined in config/epicsdev.bob.
+
+## Using AI to generate PVAccess server for arbitrary instruments.
+The epicsdev module is designed to be suitable for automatic development using AI agents.<br>
+The roadmap to create a server for new instrument using copilot at github:
+- Create new repository.
+- In the prompt section enter something like this:<br>
+'Build device support for Tektronix MSO oscilloscopes using epicsdev_rigol_scope as a template and programming manual at < link to a pdf file >.'
+- In 20-40 minutes the copilot will create a pull request.
+- Follow instructions to review, commit and merge.
+
+As an example, the generated server for Tektronix MSO oscilloscope was 99% correct and it reqiured very minor modifications.
+
+
