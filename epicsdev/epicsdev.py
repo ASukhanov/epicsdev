@@ -1,6 +1,6 @@
 """Skeleton and helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v2.1.1 26-02-05'# sleep() returns False if a periodic update occurred. Simplified waveform randomization.
+__version__= 'v2.1.2 26-02-07'# do nothing in sleep() if stopped.
 #Issue: There is no way in PVAccess to specify if string PV is writable.
 # As a workaround we append description with suffix ' Features: W' to indicate that.
 
@@ -163,14 +163,18 @@ def _create_PVs(pvDefs):
             spv.post(ivalue, timestamp=ts)
         else:
             v['display.description'] = desc
-            for field in extra.keys():              
-                if field in ['limitLow','limitHigh','format','units']:
-                    v[f'display.{field}'] = extra[field]
-                    if field.startswith('limit'):
-                        v[f'control.{field}'] = extra[field]
-                if field == 'valueAlarm':
-                    for key,value in extra[field].items():
-                        v[f'valueAlarm.{key}'] = value
+            for field in extra.keys():
+                try:
+                    if field in ['limitLow','limitHigh','format','units']:
+                        v[f'display.{field}'] = extra[field]
+                        if field.startswith('limit'):
+                            v[f'control.{field}'] = extra[field]
+                    if field == 'valueAlarm':
+                        for key,value in extra[field].items():
+                            v[f'valueAlarm.{key}'] = value
+                except  KeyError as e:
+                    print(f'Cannot set {field} for {pname}: {e}')
+                    sys.exit(1)
             spv.post(v)
 
         # add new attributes.
@@ -335,13 +339,15 @@ def sleep():
     Returns False if a periodic update occurred.
     """
     time.sleep(pvv('sleep'))
+    sleeping = True
+    if serverState().startswith('Stop'):
+        return sleeping
     tnow = timer()
     C_.cycleTimeSum += tnow - C_.lastCycleTime
     C_.lastCycleTime = tnow
     C_.cyclesAfterUpdate += 1
     C_.cycle += 1
     printv(f'cycle {C_.cycle}')
-    sleeping = True
     if tnow - C_.lastUpdateTime > PeriodicUpdateInterval:
         avgCycleTime = C_.cycleTimeSum / C_.cyclesAfterUpdate
         printv(f'Average cycle time: {avgCycleTime:.6f} S.')
