@@ -54,15 +54,15 @@
         <y_pv>pva://epicsDev0:c01Waveform</y_pv>
         <err_pv></err_pv>
         <axis>0</axis>
-        <trace_type>1</trace_type>
+        <trace_type>0</trace_type>
         <color>
           <color red="0" green="0" blue="255">
           </color>
         </color>
         <line_width>1</line_width>
         <line_style>0</line_style>
-        <point_type>0</point_type>
-        <point_size>10</point_size>
+        <point_type>1</point_type>
+        <point_size>2</point_size>
         <visible>true</visible>
       </trace>
     </traces>
@@ -92,6 +92,19 @@
     <width>550</width>
     <y_axes>
       <y_axis>
+        <title>Mpts/s</title>
+        <autoscale>true</autoscale>
+        <log_scale>false</log_scale>
+        <minimum>0.0</minimum>
+        <maximum>100.0</maximum>
+        <show_grid>false</show_grid>
+        <visible>true</visible>
+        <color>
+          <color name="Text" red="0" green="0" blue="0">
+          </color>
+        </color>
+      </y_axis>
+      <y_axis>
         <title>Volts</title>
         <autoscale>true</autoscale>
         <log_scale>false</log_scale>
@@ -107,10 +120,10 @@
     </y_axes>
     <traces>
       <trace>
-        <name>$(traces[0].y_pv)</name>
+        <name>Peak2Peak</name>
         <y_pv>pva://epicsDev0:c01Peak2Peak</y_pv>
-        <axis>0</axis>
-        <trace_type>2</trace_type>
+        <axis>1</axis>
+        <trace_type>1</trace_type>
         <color>
           <color red="0" green="0" blue="255">
           </color>
@@ -121,15 +134,29 @@
         <visible>true</visible>
       </trace>
       <trace>
-        <name>$(traces[1].y_pv)</name>
+        <name>Mean</name>
         <y_pv>pva://epicsDev0:c01Mean</y_pv>
-        <axis>0</axis>
-        <trace_type>2</trace_type>
+        <axis>1</axis>
+        <trace_type>1</trace_type>
         <color>
           <color red="255" green="0" blue="0">
           </color>
         </color>
         <line_width>1</line_width>
+        <point_type>0</point_type>
+        <point_size>10</point_size>
+        <visible>true</visible>
+      </trace>
+      <trace>
+        <name>Throughput</name>
+        <y_pv>pva://epicsDev0:throughput</y_pv>
+        <axis>2</axis>
+        <trace_type>1</trace_type>
+        <color>
+          <color red="0" green="255" blue="0">
+          </color>
+        </color>
+        <line_width>2</line_width>
         <point_type>0</point_type>
         <point_size>10</point_size>
         <visible>true</visible>
@@ -191,25 +218,50 @@
     <y>200</y>
     <horizontal_alignment>1</horizontal_alignment>
   </widget>
-  <widget type="textentry" version="3.0.0">
-    <name>Cycle time</name>
+  <widget type="label" version="2.0.0">
+    <name>Label_6</name>
+    <text>Cycle:</text>
+    <x>579</x>
+    <y>29</y>
+    <width>40</width>
+  </widget>
+  <widget type="textupdate" version="2.0.0">
+    <name>throughput</name>
+    <pv_name>pva://epicsDev0:throughput</pv_name>
+    <x>580</x>
+    <y>260</y>
+  </widget>
+  <widget type="label" version="2.0.0">
+    <name>Label_5</name>
+    <text>Throughput:: text</text>
+    <x>490</x>
+    <y>261</y>
+    <width>90</width>
+  </widget>
+  <widget type="textupdate" version="2.0.0">
+    <name>cycleTime</name>
     <pv_name>pva://epicsDev0:cycleTime</pv_name>
     <x>580</x>
     <y>240</y>
   </widget>
-  <widget type="textentry" version="3.0.0">
-    <name>Cycle</name>
+  <widget type="textupdate" version="2.0.0">
+    <name>Text Update_3</name>
     <pv_name>pva://epicsDev0:cycle</pv_name>
-    <x>620</x>
-    <y>10</y>
+    <x>629</x>
+    <y>29</y>
     <width>60</width>
     <precision>0</precision>
   </widget>
-  <widget type="label" version="2.0.0">
-    <name>Label_6</name>
-    <text>Cycle</text>
+  <widget type="combo" version="2.0.0">
+    <name>Server</name>
+    <pv_name>pva://epicsDev0:server</pv_name>
     <x>579</x>
-    <y>10</y>
-    <width>40</width>
+    <height>20</height>
+  </widget>
+  <widget type="label" version="2.0.0">
+    <name>Label_7</name>
+    <text>Server:</text>
+    <x>520</x>
+    <width>49</width>
   </widget>
 </display>
