@@ -1,6 +1,6 @@
 """Simulated multi-channel ADC device server using epicsdev module."""
 # pylint: disable=invalid-name
-__version__= 'v2.1.1 26-02-04'# added timing, throughput and c0$VoltOffset PVs
+__version__= 'v3.0.1 26-02-23'# updated to use new features of epicsdev v3.0.1, see epicsdev.py for details.
 
 import sys
 from time import perf_counter as timer
@@ -8,41 +8,42 @@ import argparse
 import numpy as np
 
 from .epicsdev import  Server, Context, init_epicsdev, serverState, publish
-from .epicsdev import  pvv, printi, printv, SPV, set_server, sleep
+from .epicsdev import  pvv, printi, printv, set_server, sleep
 
 
 def myPVDefs():
     """Example of PV definitions"""
-    SET,U,LL,LH = 'setter','units','limitLow','limitHigh'
+    F,T,U,LL,LH,SET = 'features','type','units','limitLow','limitHigh','setter'
     alarm = {'valueAlarm':{'lowAlarmLimit':-9., 'highAlarmLimit':9.}}
     pvDefs = [    # device-specific PVs
-['channels',    'Number of device channels',    SPV(pargs.channels), {}],
+['channels',    'Number of device channels',    pargs.channels],
 ['externalControl', 'Name of external PV, which controls the server',
-    SPV('Start Stop Clear Exit Started Stopped Exited'.split(), 'WD'), {}], 
-['noiseLevel',  'Noise amplitude',  SPV(0.05,'W'), {U:'V'}],
-['tAxis',       'Full scale of horizontal axis', SPV([0.]), {U:'S'}],
-['recordLength','Max number of points',     SPV(100,'W','u32'),
-    {LL:4,LH:1000000, SET:set_recordLength}],
-['alarm',       'PV with alarm',            SPV(0,'WA'), {U:'du',**alarm}],
+    'Start Stop Clear Exit Started Stopped Exited'.split(), {F:'WD'}], 
+['noiseLevel',  'Noise amplitude',  0.05, {F:'W', U:'V'}],
+['tAxis',       'Full scale of horizontal axis', [0.], {U:'S'}],
+['recordLength','Max number of points',     100,
+    {F:'W', T:'u32', LL:4, LH:1000000, SET:set_recordLength}],
+['alarm',       'PV with alarm',            0, {F:'WA', U:'du', **alarm}],
 #``````````````````Auxiliary PVs
-['timing',  'Elapsed time for waveform generation, publishing, total]', SPV([0.]), {U:'S'}],
-['throughput', 'Total number of points processed per second', SPV(0.), {U:'Mpts/s'}],
+['timing',  'Elapsed time for waveform generation, publishing, total]', [0.], {U:'S'}],
+['throughput', 'Total number of points processed per second', 0., {U:'Mpts/s'}],
     ]
 
-    # Templates for channel-related PVs. Important: SPV cannot be used in this list!
+    # Templates for channel-related PVs.
     ChannelTemplates = [
-['c0$VoltsPerDiv',  'Vertical scale',       (0.1,'W'), {U:'V/du'}],
-['c0$VoltOffset',  'Vertical offset',       (0.,'W'), {U:'V'}],
-['c0$Waveform', 'Waveform array',           ([0.],), {U:'du'}],
-['c0$Mean',     'Mean of the waveform',     (0.,'A'), {U:'du'}],
-['c0$Peak2Peak','Peak-to-peak amplitude',   (0.,'A'), {U:'du',**alarm}],
+['c0$VoltsPerDiv',  'Vertical scale',       0.1, {F:'W', U:'V/du'}],
+['c0$VoltOffset',  'Vertical offset',       0., {F:'W', U:'V'}],
+['c0$Waveform', 'Waveform array',           [0.], {U:'du'}],
+['c0$Mean',     'Mean of the waveform',     0., {F:'A', U:'du'}],
+['c0$Peak2Peak','Peak-to-peak amplitude',   0., {F:'A', U:'du', **alarm}],
     ]
     # extend PvDefs with channel-related PVs
     for ch in range(pargs.channels):
         for pvdef in ChannelTemplates:
             newpvdef = pvdef.copy()
             newpvdef[0] = pvdef[0].replace('0$',f'{ch+1:02}')
-            newpvdef[2] = SPV(*pvdef[2])
+            if len(newpvdef) > 3:
+                newpvdef[3] = newpvdef[3].copy()
             pvDefs.append(newpvdef)
     return pvDefs
 
@@ -68,7 +69,7 @@ def set_externalControl(value, *_):
     printi(f'External control PV: {pvname}')
     ctxt = Context('pva')
     try:
-        r = ctxt.get(pvname, timeout=0.5)
+        ctxt.get(pvname, timeout=0.5)
     except TimeoutError:
         printi(f'Cannot connect to external control PV {pvname}.')
         sys.exit(1)

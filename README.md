@@ -1,5 +1,5 @@
 # epicsdev
-Helper module for creating EPICS PVAccess servers.
+Helper module for creating EPICS PVAccess servers using [p4p](https://epics-base.github.io/p4p/).
 
 Demo:
 ```

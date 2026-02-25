@@ -81,7 +81,7 @@ string or device:parameter and the value is dictionary of the features.
         print(f'Plot command: {Plot}')
         #``````````mandatory member```````````````````````````````````````````
         self.rows = [
-['Device:',D, D+'server', D+'version', 'host:',D+'host',_],
+['Device:',D, D+'server', D+'VERSION', 'host:',D+'HOSTNAME',D+'CPU_LOAD'],
 ['Status:', {D+'status': span(8,1)}],
 ['Cycle time:',D+'cycleTime', 'Sleep:',D+'sleep', 'Cycle:',D+'cycle', Plot],
 ['nPoints:',D+'recordLength','Noise:',D+'noiseLevel',

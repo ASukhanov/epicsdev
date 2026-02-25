@@ -83,7 +83,7 @@ string or device:parameter and the value is dictionary of the features.
         print(f'Timing button: {Timing}')
         #``````````mandatory member```````````````````````````````````````````
         self.rows = [
-['Device:',D, D+'server', {D+'channels':just(2)},'chnls, host:',D+'host',D+'version'],
+['Device:',D, D+'server', {D+'channels':just(2)},'chnls, host:',D+'HOSTNAME',D+'VERSION'],
 ['Status:', {D+'status': span(8,1)}],
 ['Cycle time:',D+'cycleTime', 'Sleep:',D+'sleep', 'Cycle:',D+'cycle'],
 ['nPoints:',D+'recordLength','Noise:',D+'noiseLevel',

@@ -1,19 +1,22 @@
 """Skeleton and helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v2.1.2 26-02-07'# do nothing in sleep() if stopped.
-#Issue: There is no way in PVAccess to specify if string PV is writable.
-# As a workaround we append description with suffix ' Features: W' to indicate that.
+__version__= 'v3.0.1 26-02-24'# Major upgrade. Added standard EPICS iocStats PV,
+# SPV removed, PvDefs definitions simplified, new features added.
+#TODO: add support for autoSave, (feature 'A'), caputLog (feature 'H') and access rights
 
 import sys
 import time
 from time import perf_counter as timer
 import os
+import threading
 from socket import gethostname
+import psutil
 from p4p.nt import NTScalar, NTEnum
 from p4p.nt.enum import ntenum
 from p4p.server import Server
 from p4p.server.thread import SharedPV
 from p4p.client.thread import Context
+from p4p.nt import Type
 
 PeriodicUpdateInterval = 10. # seconds
 
@@ -21,10 +24,12 @@ PeriodicUpdateInterval = 10. # seconds
 def _serverStateChanged(newState:str):
     """Dummy serverStateChanged function"""
     return
+
 class C_():
     """Storage for module members"""
     prefix = ''
     verbose = 0
+    startTime = 0.
     cycle = 0
     serverState = ''
     PVs = {}
@@ -34,6 +39,11 @@ class C_():
     lastUpdateTime = 0.
     cycleTimeSum = 0.
     cyclesAfterUpdate = 0
+#``````````````````Constants
+dtype2p4p = {# mapping from numpy dtype to p4p type code
+'s8':'b', 'u8':'B', 's16':'h', 'u16':'H', 'i32':'i', 'u32':'I', 'i64':'l',
+'u64':'L', 'f32':'f', 'f64':'d', str:'s',
+}
 
 #```````````````````Helper methods````````````````````````````````````````````
 def serverState():
@@ -91,55 +101,46 @@ def publish(pvName:str, value, ifChanged=False, t=None):
     if not ifChanged or pv.current() != value:
         pv.post(value, timestamp=t)
 
-def SPV(initial, meta='', vtype=None):
-    """Construct SharedPV.
-    meta is a string with characters W,R,A,D indicating if the PV is writable,
-    has alarm or it is discrete (ENUM).
-    vtype should be one of the p4p.nt type definitions 
-    (see https://epics-base.github.io/p4p/values.html).
-    if vtype is None then the nominal type will be determined automatically.
-    initial is the initial value of the PV. It can be a single value or
-    a list/array of values (for array PVs).
-    """
-    typeCode = {# mapping from vtype to p4p type code
-    's8':'b', 'u8':'B', 's16':'h', 'u16':'H', 'i32':'i', 'u32':'I', 'i64':'l',
-    'u64':'L', 'f32':'f', 'f64':'d', str:'s',
-    }
-    iterable  = type(initial) not in (int,float,str)
-    if vtype is None:
-        firstItem = initial[0] if iterable else initial
-        itype = type(firstItem)
-        vtype = {int: 'i32', float: 'f32'}.get(itype,itype)
-    tcode = typeCode[vtype]
-    allowed_chars = 'WRAD'
-    discrete = False
-    for ch in meta:
-        if ch not in allowed_chars:
-            printe(f'Unknown meta character {ch} in SPV definition')
-            sys.exit(1)
-    if 'D' in meta:
-        discrete = True
-        initial = {'choices': initial, 'index': 0}
-        nt = NTEnum(display=True, control='W' in meta)
-    else:
-        prefix = 'a' if iterable else ''
-        nt = NTScalar(prefix+tcode, display=True, control='W' in meta,
-                      valueAlarm='A' in meta)
-    pv = SharedPV(nt=nt, initial=initial)
-    # add new attributes.
-    pv.writable = 'W' in meta
-    pv.discrete = discrete
-    return pv
-
 #``````````````````create_PVs()```````````````````````````````````````````````
 def _create_PVs(pvDefs):
+    """Create PVs from the definitions in pvDefs and add them to the map of PVs."""
+
     ts = time.time()
     for defs in pvDefs:
         try:
-            pname,desc,spv,extra = defs
+            pname,desc,initial,*extra = defs
         except ValueError:
             printe(f'Invalid PV definition of {defs[0]}')
             sys.exit(1)
+        extra = extra[0] if extra else {}
+
+        # Determine PV type and create SharedPV
+        iterable  = type(initial) not in (int,float,str)
+        vtype = extra.get('type')
+        if vtype is None:
+            firstItem = initial[0] if iterable else initial
+            itype = type(firstItem)
+            vtype = {int: 'i32', float: 'f32'}.get(itype,itype)
+        tcode = dtype2p4p[vtype]
+        allowed_chars = 'WRAD'
+        meta = extra.get('features','')
+        writable = 'W' in meta
+        valueAlarm = extra.get('valueAlarm')
+        ntextra = [('features', Type([('writable', '?')]))]
+        for ch in meta:
+            if ch not in allowed_chars:
+                printe(f'Unknown meta character {ch} in SPV definition')
+                sys.exit(1)
+        if 'D' in meta:
+            initial = {'choices': initial, 'index': 0}
+            nt = NTEnum(display=True, extra=ntextra)
+        else:
+            prefix = 'a' if iterable else ''
+            nt = NTScalar(prefix+tcode, display=True, control=writable,
+                        valueAlarm = valueAlarm is not None, extra=ntextra)
+        spv = SharedPV(nt=nt, initial=initial)
+
+        # Set initial value and description and add to the map of PVs
         ivalue = spv.current()
         printv((f'created pv {pname}, initial: {type(ivalue),ivalue},'
                f'extra: {extra}'))
@@ -149,39 +150,30 @@ def _create_PVs(pvDefs):
             sys.exit(1)
         C_.PVs[C_.prefix+pname] = spv
         v = spv._wrap(ivalue, timestamp=ts)
-        if spv.writable:
+        v['features.writable'] = writable
+        v['display.description'] = desc
+
+        # set extra parameters
+        for field in extra.keys():
             try:
-                # To indicate that the PV is writable, set control limits to
-                # (0,0). Not very elegant, but it works for numerics and enums,
-                #  not for strings.
-                v['control.limitLow'] = 0
-                v['control.limitHigh'] = 0
-            except KeyError:
-                #print(f'control not set for {pname}: {e}')
-                pass
-        if 'ntenum' in str(type(ivalue)):
-            spv.post(ivalue, timestamp=ts)
-        else:
-            v['display.description'] = desc
-            for field in extra.keys():
-                try:
-                    if field in ['limitLow','limitHigh','format','units']:
-                        v[f'display.{field}'] = extra[field]
-                        if field.startswith('limit'):
-                            v[f'control.{field}'] = extra[field]
-                    if field == 'valueAlarm':
-                        for key,value in extra[field].items():
-                            v[f'valueAlarm.{key}'] = value
-                except  KeyError as e:
-                    print(f'Cannot set {field} for {pname}: {e}')
-                    sys.exit(1)
-            spv.post(v)
+                if field in ['limitLow','limitHigh','format','units']:
+                    v[f'display.{field}'] = extra[field]
+                    if field.startswith('limit'):
+                        v[f'control.{field}'] = extra[field]
+                if field == 'valueAlarm':
+                    for key,value in extra[field].items():
+                        v[f'valueAlarm.{key}'] = value
+            except  KeyError as e:
+                print(f'Cannot set {field} for {pname}: {e}')
+                sys.exit(1)
+        spv.post(v)
 
-        # add new attributes.
-        spv.name = pname
-        spv.setter = extra.get('setter')
+        if writable:
+            # add new attributes, that will be used in the put handler
+            spv.name = pname
+            spv.setter = extra.get('setter')
 
-        if spv.writable:
+            # add put handler
             @spv.put
             def handle(spv, op):
                 ct = time.time()
@@ -246,35 +238,54 @@ def set_server(servState, *_):
     C_.serverState = servState
 
 def create_PVs(pvDefs=None):
-    """Creates manadatory PVs and adds PVs specified in pvDefs list.
-    Returns dictionary of created PVs.
-    Each definition is a list of the form:
-    [pvname, description, SPV object, extra], where extra is a dictionary of
-    extra parameters.
-    Extra parameters can include:
-    'setter' : function to be called on put
-    'units'  : string with units
-    'limitLow'  : low control limit
-    'limitHigh' : high control limit
-    'format'    : format string
-    'valueAlarm': dictionary with valueAlarm parameters, like
-        'lowAlarmLimit', 'highAlarmLimit', etc."""
-    U,LL,LH = 'units','limitLow','limitHigh'
+    """Create PVs from the definitions in C_.PVDefs and return the map of PVs.
+     pvDefs is a list of PV definitions, that will be appended to C_.PVDefs.
+     Each PV definition is a list of 3 or 4 items:
+        [pvName:str, description:str, initialValue, extra:dict]
+     The extra dict is optional and can have the following keys:
+        features: string with characters W (writable),
+            D (discrete). For example. By default, PV is read-only scalar.
+        type: string with data type, for example 'f32', 'i32', 's8', etc. By default,
+            the type is determined from the initial value (float -> 'f32', int -> 'i32').
+        units: string with physical units, for example 'V', 'S', 'Mpts/s', etc.
+        limitLow: number with low limit for the value. If defined, then the put
+            handler will check that the value is not below the low limit.
+        limitHigh: number with high limit for the value. If defined, then the put
+            handler will check that the value is not above the high limit.
+        setter: function to be called when the PV value is changed. The function
+            should have the signature:
+                def setter(value, spv):
+            where value is the new value, and spv is the SharedPV object.
+    The PVs defined in C_.PVDefs are created first, then the PVs from pvDefs are
+    created and appended to the map of PVs. That allows to have some common PVs 
+    defined in C_.PVDefs, and device-specific PVs defined in pvDefs.
+    The function returns the map of PVs, where the keys are PV names with prefix,
+    and the values are SharedPV objects."""
+
+    F,T,U,LL,LH = 'features','type','units','limitLow','limitHigh'
     C_.PVDefs = [
-['host',    'Server host name',  SPV(gethostname()), {}],
-['version', 'Program version',  SPV(__version__), {}],
-['status',  'Server status. Features: RWE',    SPV('','W'), {}],
-['server',  'Server control',
-    SPV('Start Stop Clear Exit Started Stopped Exited'.split(), 'WD'),
-        {'setter':set_server}],
-['verbose', 'Debugging verbosity', SPV(C_.verbose,'W','u8'),
-        {'setter':set_verbose, LL:0,LH:3}],
+# iocStats-related PVs
+['HOSTNAME',    'Server host name',  gethostname()],
+['VERSION',     'Program version',  'epicsdev '+__version__],
+['HEARTBEAT',   'Server heartbeat, Increments once per second', 0., {U:'S'}],
+['UPTIME',      'Server uptime in seconds', '', {U:'S'}],
+['STARTTOD',    'Server start time', time.strftime("%m/%d/%Y %H:%M:%S")],
+['CPU_LOAD',    'CPU load in %', 0., {U:'%'}],
+['CA_CONN_COUNT', 'Number of TCP connections', 0],
+# Other popular stats: CA_CLIENTS, CA_CONN_COUNT, CPU_LOAD, FD_USED, THREAD_COUNT
+
+['status',  'Server status. Features: RWE', '', {F:'W'}],
+['server',  'Server control. Features: RWE',
+    'Start Stop Clear Exit Started Stopped Exited'.split(),
+    {F:'WD', 'setter':set_server}],
+['verbose', 'Debugging verbosity',
+    C_.verbose, {F:'W', T:'u8', 'setter':set_verbose, LL:0,LH:3}],
 ['sleep', 'Pause in the main loop, it could be useful for throttling the data output',
-    SPV(1.0,'W'), {U:'S', LL:0.001, LH:10.1}],
+    1.0, {F:'W', T:'f32', U:'S', LL:0.001, LH:10.1}],
 ['cycle',   'Cycle number, published every {PeriodicUpdateInterval} S.',
-    SPV(0,'','u32'), {}],
+    0, {T:'u32'}],
 ['cycleTime','Average cycle time including sleep, published every {PeriodicUpdateInterval} S',
-    SPV(0.), {U:'S'}],
+    0., {U:'S'}],
     ]
     # append application's PVs, defined in the pvDefs and create map of
     #  providers
@@ -312,7 +323,7 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
     if serverStateChanged is not None:# set custom serverStateChanged function
         C_.serverStateChanged = serverStateChanged
     try: # check if server is already running
-        host = repr(get_externalPV(prefix+'host')).replace("'",'')
+        host = repr(get_externalPV(prefix+'HOSTNAME')).replace("'",'')
         print(f'ERROR: Server for {prefix} already running at {host}. Exiting.')
         sys.exit(1)
     except TimeoutError:
@@ -331,7 +342,16 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
             for _pvname in pvs:
                 f.write(_pvname + '\n')
     printi(f'Hosting {len(pvs)} PVs')
+    C_.startTime = time.time()
+    threading.Thread(target=_heartbeat_thread, daemon=True).start()
     return pvs
+
+def _heartbeat_thread():
+    """Thread to update heartbeat and uptime PVs."""
+    while True:
+        time.sleep(1)
+        publish('HEARTBEAT', pvv('HEARTBEAT')+1)
+        publish('UPTIME', round(time.time() - C_.startTime, 1))
 
 def sleep():
     """Sleep function to be called in the main loop. It updates cycleTime PV
@@ -353,6 +373,8 @@ def sleep():
         printv(f'Average cycle time: {avgCycleTime:.6f} S.')
         publish('cycle', C_.cycle)
         publish('cycleTime', avgCycleTime)
+        publish('CPU_LOAD', round(psutil.cpu_percent(),1))
+        publish('CA_CONN_COUNT', len(psutil.net_connections(kind='tcp')))
         C_.lastUpdateTime = tnow
         C_.cycleTimeSum = 0.
         C_.cyclesAfterUpdate = 0
@@ -366,24 +388,25 @@ if __name__ == "__main__":
 
     def myPVDefs():
         """Example of PV definitions"""
-        SET,U,LL,LH = 'setter','units','limitLow','limitHigh'
+        F,T,U,LL,LH,SET = 'features','type','units','limitLow','limitHigh','setter'
         alarm = {'valueAlarm':{'lowAlarmLimit':-9., 'highAlarmLimit':9.}}
         return [    # device-specific PVs
-['noiseLevel',  'Noise amplitude',  SPV(1.,'W'), {U:'V'}],
-['tAxis',       'Full scale of horizontal axis', SPV([0.]), {U:'S'}],
-['recordLength','Max number of points',     SPV(100,'W','u32'),
-    {LL:4,LH:1000000, SET:set_recordLength}],
-['throughput', 'Performance metrics, points per second', SPV(0.), {U:'Mpts/s'}],
-['c01Offset',   'Offset',  SPV(0.,'W'), {U:'du'}],
-['c01VoltsPerDiv',  'Vertical scale',       SPV(0.1,'W'), {U:'V/du'}],
-['c01Waveform', 'Waveform array',           SPV([0.]), {U:'du'}],
-['c01Mean',     'Mean of the waveform',     SPV(0.,'A'), {U:'du'}],
-['c01Peak2Peak','Peak-to-peak amplitude',   SPV(0.,'A'), {U:'du',**alarm}],
-['alarm',       'PV with alarm',            SPV(0,'WA'), {U:'du',**alarm}],
+['noiseLevel',  'Noise amplitude',  1., {F:'W', U:'V'}],
+['tAxis',       'Full scale of horizontal axis', [0.], {U:'S'}],
+['recordLength','Max number of points',
+    100, {F:'W', T:'u32', LL:4,LH:1000000, SET:set_recordLength}],
+['throughput', 'Performance metrics, points per second', 0., {U:'Mpts/s'}],
+['c01Offset',   'Offset',                   0., {F:'W', U:'du'}],
+['c01VoltsPerDiv',  'Vertical scale',       0.1, {F:'W', U:'V/du'}],
+['c01Waveform', 'Waveform array',           [0.], {U:'du'}],
+['c01Mean',     'Mean of the waveform',     0., {U:'du'}],
+['c01Peak2Peak','Peak-to-peak amplitude',   0., {U:'du', **alarm}],
+['alarm',       'PV with alarm',            0, {U:'du', **alarm}],
         ]
     pargs = None
     rng = np.random.default_rng()
     nPoints = 100
+    _sum = {'points': 0, 'time': 0.}
 
     def set_recordLength(value, *_):
         """Record length have changed. The tAxis should be updated
@@ -398,16 +421,29 @@ if __name__ == "__main__":
         #set_noise(pvv('noiseLevel')) # already called from set_recordLength
 
     def poll():
-        """Example of polling function. Called every cycle when server is running."""
-        #ts = timer()
+        """Example of polling function. Called every cycle when server is running.
+            It returns time, spent in publishing data"""
         wf = rng.random(pvv('recordLength'))*pvv('noiseLevel')# it takes 5ms for 1M points
         wf /= pvv('c01VoltsPerDiv')
         wf += pvv('c01Offset')
-        #print(f'Waveform updated in {timer()-ts:.6g} S.')
+        ts = timer()        
         publish('c01Waveform', wf)
+        _sum['time'] += timer() - ts
+        _sum['points'] += len(wf)
         publish('c01Peak2Peak', np.ptp(wf))
         publish('c01Mean', np.mean(wf))
-        #print(f'Polling completed in {timer()-ts:.6g} S.')
+
+    def periodic_update():
+        """Perform periodic update"""
+        #printi(f'periodic update for {C_.cyclesSinceUpdate} cycles: {ElapsedTime}')
+        if state.startswith('Stop'):
+            publish('throughput', 0.)
+        else:
+            pointsPerSecond = _sum['points']/_sum['time']/1.E6
+            publish('throughput', round(pointsPerSecond,6))
+            printv(f'periodic update. Performance: {pointsPerSecond:.3g} Mpts/s')
+            _sum['points'] = 0
+            _sum['time'] = 0.
 
     # Argument parsing
     parser = argparse.ArgumentParser(description = __doc__,
@@ -432,14 +468,18 @@ if __name__ == "__main__":
     pargs.prefix = f'{pargs.device}{pargs.index}:'
     PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose, None, pargs.list)
 
-    # Initialize the device using pargs if needed. That can be used to set 
-    # the number of points in the waveform, for example.
+    # Initialize the device using pargs if needed.
     init(pargs.npoints)
 
     # Start the Server. Use your set_server, if needed.
     set_server('Start')
 
     # Main loop
+    # In this example, we just update the waveform and its stats in a loop,
+    # but in a real application, the loop can also read data from the device,
+    # and update PVs accordingly. The loop can be paused by setting server PV to 'Stop',
+    # and exited by setting server PV to 'Exit'. 
+    # The performance metrics are updated every {PeriodicUpdateInterval} seconds.
     server = Server(providers=[PVs])
     printi(f'Server started. Sleeping per cycle: {repr(pvv("sleep"))} S.')
     while True:
@@ -449,8 +489,5 @@ if __name__ == "__main__":
         if not state.startswith('Stop'):
             poll()
         if not sleep():# Sleep and update performance metrics periodically
-            if not state.startswith('Stop'):
-                pointsPerSecond = len(pvv('c01Waveform'))/(pvv('cycleTime')-pvv('sleep'))/1.E6
-                publish('throughput', round(pointsPerSecond,6))
-                printv(f'periodic update. Performance: {pointsPerSecond:.3g} Mpts/s')
+            periodic_update()
     printi('Server is exited')
