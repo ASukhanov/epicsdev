@@ -133,7 +133,6 @@ Using this method, a server implementation for a **Tektronix MSO oscilloscope** 
 
 * Python 3.8+
 * p4p 4.2.2+
-* EPICS PVAccess environment
 
 Optional:
 
