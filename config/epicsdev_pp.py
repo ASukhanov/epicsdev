@@ -1,6 +1,5 @@
 """Pypet page for epicdev.epicsdev.
-Device instance is configured via environment variable EPICSDEV,
-default instance is epicsdev0:."""
+"""
 # pylint: disable=invalid-name
 __version__ = 'v0.1.0 2026-01-31'#
 

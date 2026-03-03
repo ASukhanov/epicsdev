@@ -1,24 +1,33 @@
 """Skeleton and helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v3.0.1 26-02-24'# Major upgrade. Added standard EPICS iocStats PV,
+__version__= 'v3.1.1 26-03-03'# Autosave is implemented.
 # SPV removed, PvDefs definitions simplified, new features added.
-#TODO: add support for autoSave, (feature 'A'), caputLog (feature 'H') and access rights
+#TODO: add support for autosave, (feature 'A'), caputLog (feature 'H') and access rights
 
 import sys
 import time
 from time import perf_counter as timer
 import os
+#import shelve
+import json
 import threading
 from socket import gethostname
 import psutil
-from p4p.nt import NTScalar, NTEnum
-from p4p.nt.enum import ntenum
+import p4p.nt
 from p4p.server import Server
 from p4p.server.thread import SharedPV
 from p4p.client.thread import Context
-from p4p.nt import Type
 
+#``````````````````Constants
 PeriodicUpdateInterval = 10. # seconds
+AutosaveInterval = 10. # 
+AutosaveDefaultDirectory = '/operations/app_store/pvCache/' # Directory to save
+# autosave files. The actual file name will be <directory><prefix>.cache
+
+dtype2p4p = {# mapping from numpy dtype to p4p type code
+'s8':'b', 'u8':'B', 's16':'h', 'u16':'H', 'i32':'i', 'u32':'I', 'i64':'l',
+'u64':'L', 'f32':'f', 'f64':'d', str:'s',
+}
 
 #``````````````````Module Storage`````````````````````````````````````````````
 def _serverStateChanged(newState:str):
@@ -39,11 +48,9 @@ class C_():
     lastUpdateTime = 0.
     cycleTimeSum = 0.
     cyclesAfterUpdate = 0
-#``````````````````Constants
-dtype2p4p = {# mapping from numpy dtype to p4p type code
-'s8':'b', 'u8':'B', 's16':'h', 'u16':'H', 'i32':'i', 'u32':'I', 'i64':'l',
-'u64':'L', 'f32':'f', 'f64':'d', str:'s',
-}
+    cachefd = None
+    lastPutTime = time.time()# last time when a put operation was performed.
+    lastAutosaveTime = 0.# last time when the cache was saved to a file.
 
 #```````````````````Helper methods````````````````````````````````````````````
 def serverState():
@@ -78,6 +85,13 @@ def printv3(msg):
     """Print debug message if verbosity level >=3."""
     _printv(msg, 3)
 
+# def nt2py(nt):
+#     """Convert nt value to python value. That is to convert p4p scalar types
+#      to python scalars, and leave other types unchanged."""
+#     ntmap = {p4p.nt.scalar.ntint:int, p4p.nt.scalar.ntfloat:float,
+#         p4p.nt.scalar.ntstr:str, p4p.nt.enum.ntenum: int}
+#     return ntmap[type(nt)](nt)
+
 def pvobj(pvName):
     """Return PV with given name"""
     return C_.PVs[C_.prefix+pvName]
@@ -90,7 +104,7 @@ def publish(pvName:str, value, ifChanged=False, t=None):
     """Publish value to PV. If ifChanged is True, then publish only if the 
     value is different from the current value. If t is not None, then use
     it as timestamp, otherwise use current time."""
-    #print(f'Publishing {pvName}')
+    #print(f'Publishing {pvName} = {value}')
     try:
         pv = pvobj(pvName)
     except KeyError:
@@ -101,9 +115,35 @@ def publish(pvName:str, value, ifChanged=False, t=None):
     if not ifChanged or pv.current() != value:
         pv.post(value, timestamp=t)
 
+def write_cache():
+    """Write PV values to the cache file. That will be used for autosave."""
+    printv('Saving PV values to cache')
+    pvcacheMap = {}
+    for pvName, pv in C_.PVs.items():
+        if pv.writable:
+            value = pv._wrap(pv.current())['value']
+            if isinstance(value, str):
+                pyval = value
+            else:
+                # for discrete PVs, we need to save the index of the current choice, not the choice itself, because the choices can be changed in the next startup. That is a good example of using extra parameters in PV definitions.
+                try:
+                    pyval = value.index
+                except Exception as e:
+                    pyval = value
+            #print(f'Caching {pvName} = {value} of type {type(value)}, python value: {pyval} of type {type(pyval)}')
+            pvcacheMap[pvName[len(C_.prefix):]] = {'value': pyval, 'time': time.time()}
+    #print(f'pvCache: {pvcacheMap}')
+    C_.cachefd.seek(0)
+    json.dump(pvcacheMap, C_.cachefd)
+    C_.cachefd.truncate()
+    C_.cachefd.flush()
+
 #``````````````````create_PVs()```````````````````````````````````````````````
-def _create_PVs(pvDefs):
-    """Create PVs from the definitions in pvDefs and add them to the map of PVs."""
+
+def create_PVs(pvDefs, pvcache=None):
+    """Create PVs from the definitions in pvDefs."""
+    if pvcache is None:
+        pvcache = {}
 
     ts = time.time()
     for defs in pvDefs:
@@ -120,25 +160,35 @@ def _create_PVs(pvDefs):
         if vtype is None:
             firstItem = initial[0] if iterable else initial
             itype = type(firstItem)
-            vtype = {int: 'i32', float: 'f32'}.get(itype,itype)
+            vtype = {int:'i32', float:'f32'}.get(itype,itype)
         tcode = dtype2p4p[vtype]
         allowed_chars = 'WRAD'
         meta = extra.get('features','')
         writable = 'W' in meta
         valueAlarm = extra.get('valueAlarm')
-        ntextra = [('features', Type([('writable', '?')]))]
+        ntextra = [('features', p4p.nt.Type([('writable', '?')]))]
         for ch in meta:
             if ch not in allowed_chars:
                 printe(f'Unknown meta character {ch} in SPV definition')
                 sys.exit(1)
         if 'D' in meta:
             initial = {'choices': initial, 'index': 0}
-            nt = NTEnum(display=True, extra=ntextra)
+            nt = p4p.nt.NTEnum(display=True, extra=ntextra)
         else:
             prefix = 'a' if iterable else ''
-            nt = NTScalar(prefix+tcode, display=True, control=writable,
+            nt = p4p.nt.NTScalar(prefix+tcode, display=True, control=writable,
                         valueAlarm = valueAlarm is not None, extra=ntextra)
+        if pname in pvcache:
+            cached = pvcache[pname]['value']
+            if isinstance(initial, dict):
+                initial['index'] = cached
+            else:
+                initial = cached
+            #printi(f'Loaded initial value for {pname} from autosave: {initial}')
+        #print(f'Creating PV {pname}, initial: {initial}')
         spv = SharedPV(nt=nt, initial=initial)
+        spv.lastTimeSaved = 0.
+        spv.writable = writable
 
         # Set initial value and description and add to the map of PVs
         ivalue = spv.current()
@@ -149,24 +199,24 @@ def _create_PVs(pvDefs):
             printe(f'Duplicate PV name: {pname}')
             sys.exit(1)
         C_.PVs[C_.prefix+pname] = spv
-        v = spv._wrap(ivalue, timestamp=ts)
-        v['features.writable'] = writable
-        v['display.description'] = desc
+        ntNamedTuples = spv._wrap(ivalue, timestamp=ts)
+        ntNamedTuples['features.writable'] = writable
+        ntNamedTuples['display.description'] = desc
 
         # set extra parameters
         for field in extra.keys():
             try:
                 if field in ['limitLow','limitHigh','format','units']:
-                    v[f'display.{field}'] = extra[field]
+                    ntNamedTuples[f'display.{field}'] = extra[field]
                     if field.startswith('limit'):
-                        v[f'control.{field}'] = extra[field]
+                        ntNamedTuples[f'control.{field}'] = extra[field]
                 if field == 'valueAlarm':
                     for key,value in extra[field].items():
-                        v[f'valueAlarm.{key}'] = value
+                        ntNamedTuples[f'valueAlarm.{key}'] = value
             except  KeyError as e:
-                print(f'Cannot set {field} for {pname}: {e}')
+                print(f'ERROR. Cannot set {field} for {pname}: {e}')
                 sys.exit(1)
-        spv.post(v)
+        spv.post(ntNamedTuples)
 
         if writable:
             # add new attributes, that will be used in the put handler
@@ -176,28 +226,32 @@ def _create_PVs(pvDefs):
             # add put handler
             @spv.put
             def handle(spv, op):
-                ct = time.time()
                 vv = op.value()
                 vr = vv.raw.value
-                current = spv._wrap(spv.current())
+                ntNamedTuples = spv._wrap(spv.current())
+                #print(f'Put request for {spv.name} = {repr(vv)}, current value: {repr(ntNamedTuples)}')
                 # check limits, if they are defined. That will be a good
                 # example of using control structure and valueAlarm.
+                printv(f'Put request for {spv.name} = {repr(vr)}, value: {ntNamedTuples["value"]}')
                 try:
-                    limitLow = current['control.limitLow']
-                    limitHigh = current['control.limitHigh']
+                    limitLow = ntNamedTuples['control.limitLow']
+                    limitHigh = ntNamedTuples['control.limitHigh']
                     if limitLow != limitHigh and not (limitLow <= vr <= limitHigh):
                         printw(f'Value {vr} is out of limits [{limitLow}, {limitHigh}]. Ignoring.')
                         op.done(error=f'Value out of limits [{limitLow}, {limitHigh}]')
                         return
                 except KeyError:
                     pass
-                if isinstance(vv, ntenum):
+                if isinstance(vv, p4p.nt.enum.ntenum):
                     vr = str(vv)
                 if spv.setter:
                     spv.setter(vr, spv)
                     # value will be updated by the setter, so get it again
-                    vr = pvv(spv.name)
+                    #vr = pvv(spv.name)
+                    vr = spv._wrap(spv.current())['value']
                 printv(f'putting {spv.name} = {vr}')
+                ct = time.time()
+                C_.lastPutTime = ct
                 spv.post(vr, timestamp=ct) # update subscribers
                 op.done()
 #,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
@@ -237,34 +291,28 @@ def set_server(servState, *_):
         return
     C_.serverState = servState
 
-def create_PVs(pvDefs=None):
-    """Create PVs from the definitions in C_.PVDefs and return the map of PVs.
-     pvDefs is a list of PV definitions, that will be appended to C_.PVDefs.
-     Each PV definition is a list of 3 or 4 items:
-        [pvName:str, description:str, initialValue, extra:dict]
-     The extra dict is optional and can have the following keys:
-        features: string with characters W (writable),
-            D (discrete). For example. By default, PV is read-only scalar.
-        type: string with data type, for example 'f32', 'i32', 's8', etc. By default,
-            the type is determined from the initial value (float -> 'f32', int -> 'i32').
-        units: string with physical units, for example 'V', 'S', 'Mpts/s', etc.
-        limitLow: number with low limit for the value. If defined, then the put
-            handler will check that the value is not below the low limit.
-        limitHigh: number with high limit for the value. If defined, then the put
-            handler will check that the value is not above the high limit.
-        setter: function to be called when the PV value is changed. The function
-            should have the signature:
-                def setter(value, spv):
+def create_pvDefs(pvDefs=None, pvcache=None):
+    """Create PVs from the definitions in pvDefs and return them as a dictionary.
+    pvDefs is a list of PV definitions. Each definition is a list of 3 or 4 items:
+    [pvName, description, initialValue, extraParameters]
+    extraParameters is a dictionary with optional keys:
+        'features': string with characters W (writable), D (discrete). For example. By default, PV is read-only scalar.
+        'type': string with data type, for example 'f32', 'i32', 's8', etc. By default, the type is determined from the initial value (float -> 'f32', int -> 'i32').
+        'units': string with physical units, for example 'V', 'S', 'Mpts/s', etc.
+        'limitLow': number with low limit for the value. If defined, then the put handler will check that the value is not below the low limit.
+        'limitHigh': number with high limit for the value. If defined, then the put handler will check that the value is not above the high limit.
+        'setter': function to be called when the PV value is changed. The function should have the signature:
+            def setter(value, spv):
             where value is the new value, and spv is the SharedPV object.
-    The PVs defined in C_.PVDefs are created first, then the PVs from pvDefs are
-    created and appended to the map of PVs. That allows to have some common PVs 
-    defined in C_.PVDefs, and device-specific PVs defined in pvDefs.
-    The function returns the map of PVs, where the keys are PV names with prefix,
-    and the values are SharedPV objects."""
-
+        The PVs defined in C_.PVDefs are created first, then the PVs from pvDefs are
+        created and appended to the map of PVs. That allows to have some common PVs 
+        defined in C_.PVDefs, and device-specific PVs defined in pvDefs.
+    pvcache is a dictionary with initial values for PVs. It is used for autosave.
+    The function returns a dictionary with PVs, where the keys are PV names and the values are SharedPV objects.
+    """
     F,T,U,LL,LH = 'features','type','units','limitLow','limitHigh'
     C_.PVDefs = [
-# iocStats-related PVs
+# EPICS PVs for iocStats, see https://epics.anl.gov/base/R3-14/7-docs/iocstats.html
 ['HOSTNAME',    'Server host name',  gethostname()],
 ['VERSION',     'Program version',  'epicsdev '+__version__],
 ['HEARTBEAT',   'Server heartbeat, Increments once per second', 0., {U:'S'}],
@@ -274,6 +322,7 @@ def create_PVs(pvDefs=None):
 ['CA_CONN_COUNT', 'Number of TCP connections', 0],
 # Other popular stats: CA_CLIENTS, CA_CONN_COUNT, CPU_LOAD, FD_USED, THREAD_COUNT
 
+# Epicsdev-specific PVs
 ['status',  'Server status. Features: RWE', '', {F:'W'}],
 ['server',  'Server control. Features: RWE',
     'Start Stop Clear Exit Started Stopped Exited'.split(),
@@ -291,7 +340,7 @@ def create_PVs(pvDefs=None):
     #  providers
     if pvDefs is not None:
         C_.PVDefs += pvDefs
-    _create_PVs(C_.PVDefs)
+    create_PVs(C_.PVDefs, pvcache)
     return C_.PVs
 
 def get_externalPV(pvName:str, timeout=0.5):
@@ -301,25 +350,39 @@ def get_externalPV(pvName:str, timeout=0.5):
     return ctxt.get(pvName, timeout=timeout)
 
 def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
-                serverStateChanged=None, listDir=None):
-    """Check if no other server is running with the same prefix.
-    Create PVs and return them as a dictionary.
-    prefix is a string to be prepended to all PV names.
-    pvDefs is a list of PV definitions (see create_PVs()).
-    verbose is the verbosity level for debug messages.
-    serverStateChanged is a function to be called when the server PV changes.
-    The function should have the signature:
-        def serverStateChanged(newStatus:str):
-    If serverStateChanged is None, then a dummy function is used.
-    The listDir is a directory to save list of all generated PVs,
-    if no directory is given, then </tmp/pvlist/><prefix> is assumed.
+                serverStateChanged=None, listDir=None, autosaveDir=None, recall = True):
+    """Initialize epicsdev with given prefix and PV definitions.
+    prefix is a string that will be prepended to all PV names. It should end with ':'.
+    pvDefs is a list of PV definitions, each definition is a list of 3 or 4 items:
+        [pvName, description, initialValue, extraParameters]
+        pvName is the name of the PV (without prefix)
+        description is a string with the description of the PV
+        initialValue is the initial value of the PV
+        extraParameters is a dictionary with optional keys:
+            'features': string with characters W (writable), D (discrete). For example. By default, PV is read-only scalar.
+            'type': string with data type, for example 'f32', 'i32', 's8', etc. By default, the type is determined from the initial value (float -> 'f32', int -> 'i32').
+            'units': string with physical units, for example 'V', 'S', 'Mpts/s', etc.
+            'limitLow': number with low limit for the value. If defined, then the put handler will check that the value is not below the low limit.
+            'limitHigh': number with high limit for the value. If defined, then the put handler will check that the value is not above the high limit.
+            'setter': function to be called when the PV value is changed. The function should have the signature:
+                def setter(value, spv):
+                where value is the new value, and spv is the SharedPV object.
+    verbose is an integer that controls the verbosity level for debugging.
+    serverStateChanged is a function that will be called when the server state changes. It should have the signature:
+        def serverStateChanged(newState:str):
+        where newState is the new state of the server ('Start', 'Stop', 'Exit', 'Clear').
+    listDir is a string that specifies the directory where the list of PVs will be saved. If None, then no list will be saved.
+    autosaveDir is a string that specifies the directory where the autosave file will be saved. If None, then no autosave will be performed.
+    recall is a boolean that specifies whether to load initial values from the autosave file. If False, then the initial values will be taken from the PV definitions.
     """
+
     if not isinstance(verbose, int) or verbose < 0:
         printe('init_epicsdev arguments should be (prefix:str, pvDefs:list, verbose:int, listDir:str)')
         sys.exit(1)
     printi(f'Initializing epicsdev with prefix {prefix}')
     C_.prefix = prefix
     C_.verbose = verbose
+
     if serverStateChanged is not None:# set custom serverStateChanged function
         C_.serverStateChanged = serverStateChanged
     try: # check if server is already running
@@ -330,19 +393,43 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
         pass
 
     # No existing server found. Creating PVs.
-    pvs = create_PVs(pvDefs)
+    pvcache = {}
+    if autosaveDir == '':# autosaveDir enabled with default file name
+        autosaveDir = AutosaveDefaultDirectory
+    if recall:
+        try:
+            autosaveFile = f'{autosaveDir}{prefix[:-1]}.cache'
+            with open(autosaveFile, "r") as json_file:
+                pvcache = json.load(json_file)
+        except Exception:
+            print(f'WARNING: pvCache file {autosaveFile} not found. Using default values')
+    printv(f'AutosaveDir: {autosaveDir}, recall: {recall}')
+    if len(pvcache) == 0:
+        printi(f'Loading default values')
+    else:
+        printi(f'Loading initial values from {autosaveFile}')
+        printv(f'pvCache: {pvcache}')
+    pvs = create_pvDefs(pvDefs, pvcache)
+    # Set up autosave if requested. That will save PV values to a file, and restore them on the next startup.
+    if autosaveDir is not None:
+        os.makedirs(autosaveDir, exist_ok=True)
+        autosaveFile = f'{autosaveDir}{prefix[:-1]}.cache'
+        C_.cachefd = open(autosaveFile, 'w')
+        printi(f'Autosave enabled. Saving to {autosaveFile}')
+
     # Save list of PVs to a file, if requested
     if listDir != '':
         listDir = '/tmp/pvlist/' if listDir is None else listDir
         if not os.path.exists(listDir):
             os.makedirs(listDir)
         filepath = f'{listDir}{prefix[:-1]}.txt'
-        print(f'Writing list of PVs to {filepath}')
+        printi(f'Writing list of PVs to {filepath}')
         with open(filepath, 'w', encoding="utf-8") as f:
             for _pvname in pvs:
                 f.write(_pvname + '\n')
     printi(f'Hosting {len(pvs)} PVs')
     C_.startTime = time.time()
+
     threading.Thread(target=_heartbeat_thread, daemon=True).start()
     return pvs
 
@@ -379,6 +466,13 @@ def sleep():
         C_.cycleTimeSum = 0.
         C_.cyclesAfterUpdate = 0
         sleeping = False
+    if tnow - C_.lastAutosaveTime > AutosaveInterval:
+        C_.lastAutosaveTime = tnow
+        if C_.lastPutTime != 0.:
+            C_.lastPutTime = 0.
+            write_cache()
+        else:
+            printv('No changes to save')
     return sleeping
 
 #``````````````````Demo````````````````````````````````````````````````````````
@@ -445,10 +539,17 @@ if __name__ == "__main__":
             _sum['points'] = 0
             _sum['time'] = 0.
 
-    # Argument parsing
+    # Parse command line arguments  
     parser = argparse.ArgumentParser(description = __doc__,
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     epilog=f'{__version__}')
+    parser.add_argument('-a', '--autosave', nargs='?', default='', help=
+'Autosave control. If not given, then autosave is enabled with default file '\
+'name /tmp/<device><index>.cache. ' \
+'If given without argument, then autosave is disabled' \
+'If a file name is given, then it is used for autosave.')
+    parser.add_argument('-c', '--recall', action='store_false', help=
+'If given: Do not load initial values from pvCache file. That is useful when you want to start with default values, but do not want to disable autosave. By default, the initial values are loaded from the cache file if it exists.')
     parser.add_argument('-d', '--device', default='epicsDev', help=
 'Device name, the PV name will be <device><index>:')
     parser.add_argument('-i', '--index', default='0', help=
@@ -462,12 +563,12 @@ if __name__ == "__main__":
     parser.add_argument('-v', '--verbose', action='count', default=0, help=
 'Show more log messages (-vv: show even more)') 
     pargs = parser.parse_args()
-    print(pargs)
+    printv(pargs)
 
     # Initialize epicsdev and PVs
     pargs.prefix = f'{pargs.device}{pargs.index}:'
-    PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose, None, pargs.list)
-
+    PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose, None,
+                        pargs.list, pargs.autosave, pargs.recall)
     # Initialize the device using pargs if needed.
     init(pargs.npoints)
 

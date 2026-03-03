@@ -1,6 +1,6 @@
 """Simulated multi-channel ADC device server using epicsdev module."""
 # pylint: disable=invalid-name
-__version__= 'v3.0.1 26-02-23'# updated to use new features of epicsdev v3.0.1, see epicsdev.py for details.
+__version__= 'v3.1.1 26-03-03'# updated to use new features of epicsdev v3.1.0
 
 import sys
 from time import perf_counter as timer
@@ -12,7 +12,10 @@ from .epicsdev import  pvv, printi, printv, set_server, sleep
 
 
 def myPVDefs():
-    """Example of PV definitions"""
+    """Define PVs for the multiadc device. The PVs are defined as a list of
+    lists, where each inner list contains the PV name, description, initial
+    value, and optional dictionary of additional attributes.
+    """
     F,T,U,LL,LH,SET = 'features','type','units','limitLow','limitHigh','setter'
     alarm = {'valueAlarm':{'lowAlarmLimit':-9., 'highAlarmLimit':9.}}
     pvDefs = [    # device-specific PVs
@@ -21,7 +24,7 @@ def myPVDefs():
     'Start Stop Clear Exit Started Stopped Exited'.split(), {F:'WD'}], 
 ['noiseLevel',  'Noise amplitude',  0.05, {F:'W', U:'V'}],
 ['tAxis',       'Full scale of horizontal axis', [0.], {U:'S'}],
-['recordLength','Max number of points',     100,
+['recordLength','Max number of points', pargs.npoints,
     {F:'W', T:'u32', LL:4, LH:1000000, SET:set_recordLength}],
 ['alarm',       'PV with alarm',            0, {F:'WA', U:'du', **alarm}],
 #``````````````````Auxiliary PVs
@@ -56,7 +59,7 @@ class C_():
 #``````````````````Setter functions for PVs```````````````````````````````````
 def set_recordLength(value, *_):
     """Record length have changed. The tAxis should be updated accordingly."""
-    printi(f'Setting tAxis to {value}')
+    printi(f'Setting tAxis to {repr(value)}')
     publish('tAxis', np.arange(value)*1.E-6)
     publish('recordLength', value)
 
@@ -84,14 +87,13 @@ def serverStateChanged(newState:str):
         printi('clear_device called')
         publish('cycle', 0)
 
-def init(recordLength):
+def init():
     """Device initialization function"""
-    set_recordLength(recordLength)
+    set_recordLength(pvv('recordLength'))
     # Set offset of each channel = channel index
     for ch in range(pargs.channels):
         publish(f'c{ch+1:02}VoltOffset', ch)
     #set_externalControl(pargs.prefix + pargs.external)
-    publish('sleep', pargs.sleep)
 
 def poll():
     """Device polling function, called every cycle when server is running"""
@@ -129,7 +131,14 @@ def periodic_update():
 parser = argparse.ArgumentParser(description = __doc__,
 formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 epilog=f'{__version__}')
-parser.add_argument('-c', '--channels', type=int, default=6, help=
+parser.add_argument('-a', '--autosave', nargs='?', default='', help=
+'Autosave control. If not given, then autosave is enabled with default file '\
+'name /tmp/<device><index>.cache. ' \
+'If given without argument, then autosave is disabled' \
+'If a file name is given, then it is used for autosave.')
+parser.add_argument('-c', '--recall', action='store_false', help=
+'If given: Do not load initial values from pvCache file. That is useful when you want to start with default values, but do not want to disable autosave. By default, the initial values are loaded from the cache file if it exists.')
+parser.add_argument('-C', '--channels', type=int, default=6, help=
 'Number of channels per device')
 parser.add_argument('-e', '--external', help=
 'Name of external PV, which controls the server, if 0 then it will be <device>0:')
@@ -142,23 +151,22 @@ parser.add_argument('-i', '--index', default='0', help=
 # The rest of arguments are not essential, they can be changed at runtime using PVs.
 parser.add_argument('-n', '--npoints', type=int, default=100, help=
 'Number of points in the waveform')
-parser.add_argument('-s', '--sleep', type=float, default=1.0, help=
-'Sleep time per cycle')
+#parser.add_argument('-s', '--sleep', type=float, default=1.0, help=
+#'Sleep time per cycle')
 parser.add_argument('-v', '--verbose', action='count', default=0, help=
 'Show more log messages (-vv: show even more)') 
 pargs = parser.parse_args()
-print(f'pargs: {pargs}')
+printv(f'pargs: {pargs}')
 
 # Initialize epicsdev and PVs
 pargs.prefix = f'{pargs.device}{pargs.index}:'
 PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose,
-                    serverStateChanged, pargs.list)
+    serverStateChanged, pargs.list, pargs.autosave, pargs.recall)
 
-# Initialize the device, using pargs if needed. 
-# That can be used to set the number of points in the waveform, for example.
-init(pargs.npoints)
+# Initialize the device.
+init()
 
-# Start the Server. Use your set_server, if needed.
+# Start the Server.
 set_server('Start')
 
 #``````````````````Main loop``````````````````````````````````````````````````
