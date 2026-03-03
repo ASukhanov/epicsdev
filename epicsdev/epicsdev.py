@@ -1,6 +1,6 @@
 """Skeleton and helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v3.1.1 26-03-03'# Autosave is implemented.
+__version__= 'v3.1.2 26-03-03'# Do not autosave if --autosave is not handled.
 # SPV removed, PvDefs definitions simplified, new features added.
 #TODO: add support for autosave, (feature 'A'), caputLog (feature 'H') and access rights
 
@@ -466,7 +466,8 @@ def sleep():
         C_.cycleTimeSum = 0.
         C_.cyclesAfterUpdate = 0
         sleeping = False
-    if tnow - C_.lastAutosaveTime > AutosaveInterval:
+
+    if C_.cachefd is not None and tnow - C_.lastAutosaveTime > AutosaveInterval:
         C_.lastAutosaveTime = tnow
         if C_.lastPutTime != 0.:
             C_.lastPutTime = 0.

@@ -9,6 +9,11 @@ Helper module for building **EPICS PVAccess servers** using [p4p](https://github
 * GUI-based monitoring and control
 * AI-assisted automatic device support generation
 
+It integrates following EPICS IOC services:<br>
+* autoSave
+* iocStats
+* caputLog (work in progress)
+
 ---
 
 ## Installation
