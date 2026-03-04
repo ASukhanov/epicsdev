@@ -11,7 +11,7 @@ Helper module for building **EPICS PVAccess servers** using [p4p](https://github
 * AI-assisted automatic device support generation
 
 It integrates following EPICS IOC services:<br>
-* **Autosave**: automatically saves the values of EPICS process variables (PVs) to files on a server host, and restores those values when the server restarts
+* **Autosave**: automatically saves the values of EPICS process variables (PVs) to files on a server host, and restores those values when the server restarts.
 * **IocStats**: provides support for PVs that show the health and status of the server, plus a few control PVs.
 * **caPutLog** (work in progress): logging of PVAccess **`put`** operations.
 ---
@@ -52,7 +52,7 @@ The screenshots can be seen here: [control page](docs/epicsdev_pypet.png), [plot
 
 ### Phoebus Display
 
-An example Phoebus display is provided: `config/epicsdev.bob`. [Screenshot](docs/phoebus_epicsdev.jpg)
+An example Phoebus display is provided: `config/epicsdev.bob`. [Screenshot](docs/phoebus_epicsdev.jpg).
 
 ## Multi-Channel Waveform Generator
 
