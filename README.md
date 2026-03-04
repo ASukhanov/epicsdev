@@ -7,21 +7,13 @@ Helper module for building **EPICS PVAccess servers** using [p4p](https://github
 * Rapid PVAccess server development
 * High-rate data simulation and stress testing
 * GUI-based monitoring and control
+* Rapid instrument integration
 * AI-assisted automatic device support generation
 
-## Contents
-
-- [Installation](#installation)
-- [Runnable Modules](docs/modules.md)
-- [Quick Demo](#quick-demo)
-- [Text Put Logger](#text-put-logger)
-- [Control & Visualization](#control--visualization)
-- [Multi-Channel Waveform Generator](#multi-channel-waveform-generator)
-- [Phoebus Display](#phoebus-display)
-- [AI-Assisted Device Support Development](#ai-assisted-device-support-development)
-- [Use Cases](#use-cases)
-- [Requirements](#requirements)
-
+It integrates following EPICS IOC services:<br>
+* **Autosave**: automatically saves the values of EPICS process variables (PVs) to files on a server host, and restores those values when the server restarts
+* **IocStats**: provides support for PVs that show the health and status of the server, plus a few control PVs.
+* **caPutLog** (work in progress): logging of PVAccess **`put`** operations.
 ---
 
 ## Installation
@@ -32,8 +24,6 @@ python -m pip install epicsdev
 
 Runnable module index: [docs/modules.md](docs/modules.md)
 
----
-
 ## Quick Demo
 
 Start the demo PVAccess server:
@@ -41,28 +31,7 @@ Start the demo PVAccess server:
 ```bash
 python -m epicsdev.epicsdev
 ```
-
----
-
-## Text Put Logger
-
-`epicsdev.putlog` hosts a writable PV named `dump` and appends any written text to a file.
-
-Start the logger server (required argument: output file path):
-
-```bash
-python -m epicsdev.putlog /tmp/putlog.txt
-```
-
-Default PV prefix is `putlog0:`, so write text to:
-
-```bash
-caput -p pva putlog0:dump "hello from client"
-```
-
----
-
-## Control & Visualization
+### Control & Visualization
 
 Install optional GUI and plotting tools:
 
@@ -82,45 +51,48 @@ This provides:
 * Live waveform plots
 * Real-time parameter monitoring
 
----
+The screenshots can be seen here: [control page](docs/epicsdev_pypet.png), [plots](docs/epicsdev_pvplot.jpg).
+
+### Phoebus Display
+
+An example Phoebus display is provided: `config/epicsdev.bob`. [Screenshot](docs/phoebus_epicsdev.jpg)
 
 ## Multi-Channel Waveform Generator
 
 `epicsdev.multiadc` generates high-throughput synthetic data for stress-testing EPICS systems.
 
-### Example
-
-Generate:
+For example, the following command :
+```bash
+python -m epicsdev.multiadc -s 0.1 -c 10000 -n 100
+```
+Will start a server, which generates:
 
 * **10,000** noisy waveforms per second
 * **100 points per waveform**
 * **40,000 scalar parameters per second**
 
-```bash
-python -m epicsdev.multiadc -s 0.1 -c 10000 -n 100
-```
 
 ### Monitoring GUI
 
 ```bash
 python -m pypeto -c config -f multiadc
 ```
+## Text Put Logger
 
-The GUI includes:
+`epicsdev.putlog` hosts a writable PV named `dump` and appends any written text to a file.
 
-* Control page
-* Real-time waveform plots
-The screenshots can be seen here: [control page](docs/epicsdev_pypet.png), [plots](docs/epicsdev_pvplot.jpg).
+Start the logger server (required argument: output file path):
+
+```bash
+python -m epicsdev.putlog /tmp/putlog.txt
+```
+
+Default PV prefix is `putlog0:`, so write text to:
+
+```bash
+caput -p pva putlog0:dump "hello from client"
+```
 ---
-
-## Phoebus Display
-
-An example Phoebus display is provided:
-
-`config/epicsdev.bob`
----
-[Screenshot](docs/phoebus_epicsdev.jpg)
-
 ## AI-Assisted Device Support Development
 
 `epicsdev` is structured to enable automated server generation using AI tools such as GitHub Copilot.
@@ -143,20 +115,10 @@ An example Phoebus display is provided:
 
 ### Real-World Example
 
-Using this method, a server implementation for a **Tektronix MSO oscilloscope** was:
+Using this method, a server implementation for [Tektronix MSO oscilloscopes](https://github.com/ASukhanov/epicsdev_tektronix) was:
 
 * ~99% correct on first generation
 * Required only minor adjustments
-
----
-
-## Use Cases
-
-* EPICS PVAccess server prototyping
-* High-rate data simulation
-* Control system stress testing
-* Rapid instrument integration
-* AI-driven device support generation
 
 ---
 
