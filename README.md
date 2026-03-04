@@ -21,9 +21,6 @@ It integrates following EPICS IOC services:<br>
 ```bash
 python -m pip install epicsdev
 ```
-
-Runnable module index: [docs/modules.md](docs/modules.md)
-
 ## Quick Demo
 
 Start the demo PVAccess server:
