@@ -9,10 +9,18 @@ Helper module for building **EPICS PVAccess servers** using [p4p](https://github
 * GUI-based monitoring and control
 * AI-assisted automatic device support generation
 
-It integrates following EPICS IOC services:<br>
-* autoSave
-* iocStats
-* caputLog (work in progress)
+## Contents
+
+- [Installation](#installation)
+- [Runnable Modules](docs/modules.md)
+- [Quick Demo](#quick-demo)
+- [Text Put Logger](#text-put-logger)
+- [Control & Visualization](#control--visualization)
+- [Multi-Channel Waveform Generator](#multi-channel-waveform-generator)
+- [Phoebus Display](#phoebus-display)
+- [AI-Assisted Device Support Development](#ai-assisted-device-support-development)
+- [Use Cases](#use-cases)
+- [Requirements](#requirements)
 
 ---
 
@@ -22,6 +30,8 @@ It integrates following EPICS IOC services:<br>
 python -m pip install epicsdev
 ```
 
+Runnable module index: [docs/modules.md](docs/modules.md)
+
 ---
 
 ## Quick Demo
@@ -30,6 +40,24 @@ Start the demo PVAccess server:
 
 ```bash
 python -m epicsdev.epicsdev
+```
+
+---
+
+## Text Put Logger
+
+`epicsdev.putlog` hosts a writable PV named `dump` and appends any written text to a file.
+
+Start the logger server (required argument: output file path):
+
+```bash
+python -m epicsdev.putlog /tmp/putlog.txt
+```
+
+Default PV prefix is `putlog0:`, so write text to:
+
+```bash
+caput -p pva putlog0:dump "hello from client"
 ```
 
 ---
@@ -56,7 +84,7 @@ This provides:
 
 ---
 
-# Multi-Channel Waveform Generator
+## Multi-Channel Waveform Generator
 
 `epicsdev.multiadc` generates high-throughput synthetic data for stress-testing EPICS systems.
 
@@ -81,7 +109,7 @@ python -m pypeto -c config -f multiadc
 The GUI includes:
 
 * Control page
-* Real-time waveform plots<br>
+* Real-time waveform plots
 The screenshots can be seen here: [control page](docs/epicsdev_pypet.png), [plots](docs/epicsdev_pvplot.jpg).
 ---
 
@@ -89,17 +117,15 @@ The screenshots can be seen here: [control page](docs/epicsdev_pypet.png), [plot
 
 An example Phoebus display is provided:
 
-```
-config/epicsdev.bob<br>
-```
+`config/epicsdev.bob`
 ---
 [Screenshot](docs/phoebus_epicsdev.jpg)
 
-# AI-Assisted Device Support Development
+## AI-Assisted Device Support Development
 
 `epicsdev` is structured to enable automated server generation using AI tools such as GitHub Copilot.
 
-## Workflow Example
+### Workflow Example
 
 1. Create a new GitHub repository.
 
@@ -124,7 +150,7 @@ Using this method, a server implementation for a **Tektronix MSO oscilloscope** 
 
 ---
 
-# Use Cases
+## Use Cases
 
 * EPICS PVAccess server prototyping
 * High-rate data simulation
@@ -134,7 +160,7 @@ Using this method, a server implementation for a **Tektronix MSO oscilloscope** 
 
 ---
 
-# Requirements
+## Requirements
 
 * Python 3.8+
 * p4p 4.2.2+
