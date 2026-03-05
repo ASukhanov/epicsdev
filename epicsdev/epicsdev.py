@@ -268,7 +268,8 @@ def create_PVs(pvDefs, pvcache=None):
                     try:
                         IFace.put(C_.putlogPV, "'"+s+"'", timeout=0.5)# quote the string to avoid interpreting it as JSON
                     except TimeoutError:
-                        printw(f'WARNING: putlog PV {C_.putlogPV} not accessible.')
+                        printw(f'WARNING: caPutLog feature will be disabled: PV {C_.putlogPV} not accessible.')
+                        C_.putlogPV = None
                 op.done()
 #,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 #``````````````````Setters
@@ -445,7 +446,8 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
             _ = IFace.get(putlogPV, timeout=0.5)
             C_.putlogPV = putlogPV
     except TimeoutError:
-        printw(f'WARNING: putlog PV {putlogPV} not accessible.')
+        printw(f'WARNING: caPutLog feature will not work: PV {putlogPV} not accessible.')
+        C_.putlogPV = None
 
     threading.Thread(target=_heartbeat_thread, daemon=True).start()
     return pvs
