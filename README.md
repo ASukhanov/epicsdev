@@ -13,7 +13,7 @@ Helper module for building **EPICS PVAccess servers** using [p4p](https://github
 It integrates following EPICS IOC services:<br>
 * **Autosave**: automatically saves the values of EPICS process variables (PVs) to files on a server host, and restores those values when the server restarts.
 * **IocStats**: provides support for PVs that show the health and status of the server, plus a few control PVs.
-* **caPutLog** (work in progress): logging of PVAccess **`put`** operations.
+* **caPutLog**: logging of PVAccess **`put`** operations.
 ---
 
 ## Installation

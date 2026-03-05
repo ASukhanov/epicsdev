@@ -1,12 +1,13 @@
-"""Skeleton and helper functions for creating EPICS PVAccess server"""
+"""Helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v3.1.2 26-03-03'# Do not autosave if --autosave is not handled.
+__version__= 'v3.1.3 26-03-04'# putlog functionality added, some refactoring, new features of epicsdev v3.1.0 used, some bugs fixed.
 # SPV removed, PvDefs definitions simplified, new features added.
 #TODO: add support for autosave, (feature 'A'), caputLog (feature 'H') and access rights
 
 import sys
 import time
 from time import perf_counter as timer
+from datetime import datetime
 import os
 #import shelve
 import json
@@ -23,6 +24,7 @@ PeriodicUpdateInterval = 10. # seconds
 AutosaveInterval = 10. # 
 AutosaveDefaultDirectory = '/operations/app_store/pvCache/' # Directory to save
 # autosave files. The actual file name will be <directory><prefix>.cache
+IFace = Context('pva')# client context for getting values from other servers
 
 dtype2p4p = {# mapping from numpy dtype to p4p type code
 's8':'b', 'u8':'B', 's16':'h', 'u16':'H', 'i32':'i', 'u32':'I', 'i64':'l',
@@ -51,6 +53,7 @@ class C_():
     cachefd = None
     lastPutTime = time.time()# last time when a put operation was performed.
     lastAutosaveTime = 0.# last time when the cache was saved to a file.
+    putlogPV = None # name of the PV where put operations are logged. If None, then put operations are not logged.
 
 #```````````````````Helper methods````````````````````````````````````````````
 def serverState():
@@ -223,16 +226,17 @@ def create_PVs(pvDefs, pvcache=None):
             spv.name = pname
             spv.setter = extra.get('setter')
 
-            # add put handler
+            # add a put handler
             @spv.put
             def handle(spv, op):
                 vv = op.value()
                 vr = vv.raw.value
                 ntNamedTuples = spv._wrap(spv.current())
+                oldvr = ntNamedTuples['value']
                 #print(f'Put request for {spv.name} = {repr(vv)}, current value: {repr(ntNamedTuples)}')
                 # check limits, if they are defined. That will be a good
                 # example of using control structure and valueAlarm.
-                printv(f'Put request for {spv.name} = {repr(vr)}, value: {ntNamedTuples["value"]}')
+                #print(f'Put request for {spv.name} = {repr(vr)}, value: {ntNamedTuples["value"]}, peer: {op.name()}, {op.peer()}, {op.account()}, {op.roles()}')
                 try:
                     limitLow = ntNamedTuples['control.limitLow']
                     limitHigh = ntNamedTuples['control.limitHigh']
@@ -253,6 +257,18 @@ def create_PVs(pvDefs, pvcache=None):
                 ct = time.time()
                 C_.lastPutTime = ct
                 spv.post(vr, timestamp=ct) # update subscribers
+
+                if C_.putlogPV is not None:
+                    dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3].split()
+                    ip = op.peer().split(':')[3][:-1]# peer looks like: [::ffff:192.168.27.6]:46362
+                    jmsg = {"date":dt[0], "time":dt[1], 
+                        "host":ip, "user":op.account(),
+                        "pv":op.name(), "new":vr, "old":oldvr}
+                    s = json.dumps(jmsg)
+                    try:
+                        IFace.put(C_.putlogPV, "'"+s+"'", timeout=0.5)# quote the string to avoid interpreting it as JSON
+                    except TimeoutError:
+                        printw(f'WARNING: putlog PV {C_.putlogPV} not accessible.')
                 op.done()
 #,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 #``````````````````Setters
@@ -343,14 +359,8 @@ def create_pvDefs(pvDefs=None, pvcache=None):
     create_PVs(C_.PVDefs, pvcache)
     return C_.PVs
 
-def get_externalPV(pvName:str, timeout=0.5):
-    """Get value of PV from another server. That can be used to check if the
-    server is already running, or to get values from other servers."""
-    ctxt = Context('pva')
-    return ctxt.get(pvName, timeout=timeout)
-
-def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
-                serverStateChanged=None, listDir=None, autosaveDir=None, recall = True):
+def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
+        listDir=None, autosaveDir=None, recall = True, putlogPV=None):
     """Initialize epicsdev with given prefix and PV definitions.
     prefix is a string that will be prepended to all PV names. It should end with ':'.
     pvDefs is a list of PV definitions, each definition is a list of 3 or 4 items:
@@ -386,7 +396,7 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
     if serverStateChanged is not None:# set custom serverStateChanged function
         C_.serverStateChanged = serverStateChanged
     try: # check if server is already running
-        host = repr(get_externalPV(prefix+'HOSTNAME')).replace("'",'')
+        host = repr(IFace.get(prefix+'HOSTNAME', timeout=0.5)).replace("'",'')
         print(f'ERROR: Server for {prefix} already running at {host}. Exiting.')
         sys.exit(1)
     except TimeoutError:
@@ -429,6 +439,13 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0,
                 f.write(_pvname + '\n')
     printi(f'Hosting {len(pvs)} PVs')
     C_.startTime = time.time()
+
+    try:
+        if putlogPV is not None:
+            _ = IFace.get(putlogPV, timeout=0.5)
+            C_.putlogPV = putlogPV
+    except TimeoutError:
+        printw(f'WARNING: putlog PV {putlogPV} not accessible.')
 
     threading.Thread(target=_heartbeat_thread, daemon=True).start()
     return pvs
@@ -561,15 +578,17 @@ if __name__ == "__main__":
     # The rest of options are not essential, they can be controlled at runtime using PVs.
     parser.add_argument('-n', '--npoints', type=int, default=nPoints, help=
 'Number of points in the waveform')
+    parser.add_argument('-p', '--putlogPV', default='putlog:dump', help=
+'Name of the PV where put operations are logged. If None, then put operations are not logged.')
     parser.add_argument('-v', '--verbose', action='count', default=0, help=
 'Show more log messages (-vv: show even more)') 
     pargs = parser.parse_args()
-    printv(pargs)
+    print(pargs)
 
     # Initialize epicsdev and PVs
     pargs.prefix = f'{pargs.device}{pargs.index}:'
     PVs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose, None,
-                        pargs.list, pargs.autosave, pargs.recall)
+                    pargs.list, pargs.autosave, pargs.recall, pargs.putlogPV)
     # Initialize the device using pargs if needed.
     init(pargs.npoints)
 

@@ -1,5 +1,6 @@
 """PVAccess text logger server: writes text from PV `dump` to a file."""
 # pylint: disable=invalid-name
+__version__= 'v0.0.2 26-03-04'
 
 import argparse
 import threading
@@ -41,24 +42,21 @@ def main():
         description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        'logfile',
-        help='Path to file where text written to the dump PV is appended.',
-    )
-    parser.add_argument('-d', '--device', default='putlog', help='Device name, PV prefix is <device><index>:')
-    parser.add_argument('-i', '--index', default='0', help='Device index, PV prefix is <device><index>:')
-    parser.add_argument('-l', '--list', nargs='?', help='Directory to save generated PV list.')
-    parser.add_argument('-v', '--verbose', action='count', default=0, help='Show more log messages (-vv: more).')
+    parser.add_argument('logfile', nargs='?', default='/tmp/putlog.log', help=
+        'Path to file where text written to the dump PV is appended.')
+    parser.add_argument('-p', '--prefix', default='putlog:', help='PV prefix')
+    parser.add_argument('-v', '--verbose', action='count', default=0, help=
+        'Show more log messages (-vv: more).')
     pargs = parser.parse_args()
 
     C_.logfile = open(pargs.logfile, 'a', encoding='utf-8')
 
-    prefix = f'{pargs.device}{pargs.index}:'
-    pvs = init_epicsdev(prefix, myPVDefs(), pargs.verbose, None, pargs.list, None, True)
+    pvs = init_epicsdev(pargs.prefix, myPVDefs(), pargs.verbose, listDir='')
+
     set_server('Start')
 
     C_.server = Server(providers=[pvs])
-    printi(f'Server started with prefix {prefix}, writing dump text to {pargs.logfile}')
+    printi(f'Server started with prefix {pargs.prefix}, writing dump text to {pargs.logfile}')
     try:
         while True:
             if serverState().startswith('Exit'):
@@ -67,7 +65,6 @@ def main():
     finally:
         C_.logfile.close()
         printi('Server has exited')
-
 
 if __name__ == '__main__':
     main()
