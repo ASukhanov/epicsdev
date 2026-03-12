@@ -87,7 +87,7 @@ python -m epicsdev.putlog /tmp/putlog.txt
 Default PV prefix is `putlog0:`, so write text to:
 
 ```bash
-caput -p pva putlog0:dump "hello from client"
+pvput putlog0:dump "hello from client"
 ```
 ---
 ## AI-Assisted Device Support Development
