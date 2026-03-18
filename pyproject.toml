@@ -17,7 +17,8 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "p4p>=4.2.2"
+    "p4p>=4.2.2",
+    "psutil",
 ]
 [project.urls]
 "Homepage" = "https://github.com/ASukhanov/epicsdev"

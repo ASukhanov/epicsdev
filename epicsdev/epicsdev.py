@@ -1,6 +1,6 @@
 """Helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v3.1.3 26-03-04'# putlog functionality added, some refactoring, new features of epicsdev v3.1.0 used, some bugs fixed.
+__version__= 'v3.1.4 26-03-16'# Setters for enums were not working, recovered.
 # SPV removed, PvDefs definitions simplified, new features added.
 #TODO: add support for autosave, (feature 'A'), caputLog (feature 'H') and access rights
 
@@ -251,8 +251,8 @@ def create_PVs(pvDefs, pvcache=None):
                 if spv.setter:
                     spv.setter(vr, spv)
                     # value will be updated by the setter, so get it again
-                    #vr = pvv(spv.name)
-                    vr = spv._wrap(spv.current())['value']
+                    vr = pvv(spv.name)
+                    #vr = spv._wrap(spv.current())['value']
                 printv(f'putting {spv.name} = {vr}')
                 ct = time.time()
                 C_.lastPutTime = ct
@@ -263,7 +263,8 @@ def create_PVs(pvDefs, pvcache=None):
                     ip = op.peer().split(':')[3][:-1]# peer looks like: [::ffff:192.168.27.6]:46362
                     jmsg = {"date":dt[0], "time":dt[1], 
                         "host":ip, "user":op.account(),
-                        "pv":op.name(), "new":vr, "old":oldvr}
+                        "pv":op.name(), "new":str(vr), "old":str(oldvr)}
+                    printv(f'Logging put operation: {jmsg}')
                     s = json.dumps(jmsg)
                     try:
                         IFace.put(C_.putlogPV, "'"+s+"'", timeout=0.5)# quote the string to avoid interpreting it as JSON
@@ -423,7 +424,11 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
     pvs = create_pvDefs(pvDefs, pvcache)
     # Set up autosave if requested. That will save PV values to a file, and restore them on the next startup.
     if autosaveDir is not None:
-        os.makedirs(autosaveDir, exist_ok=True)
+        try:
+            os.makedirs(autosaveDir, exist_ok=True)
+        except PermissionError:
+            printe(f'Permission denied to create {autosaveDir}. Use --autosave option.')
+            sys.exit(1)
         autosaveFile = f'{autosaveDir}{prefix[:-1]}.cache'
         C_.cachefd = open(autosaveFile, 'w')
         printi(f'Autosave enabled. Saving to {autosaveFile}')
@@ -445,6 +450,7 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
         if putlogPV is not None:
             _ = IFace.get(putlogPV, timeout=0.5)
             C_.putlogPV = putlogPV
+            printi(f'caPutLog feature enabled for PV {putlogPV}')
     except TimeoutError:
         printw(f'WARNING: caPutLog feature will not work: PV {putlogPV} not accessible.')
         C_.putlogPV = None
