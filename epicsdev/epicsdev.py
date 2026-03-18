@@ -1,6 +1,6 @@
 """Helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v3.1.4 26-03-16'# Setters for enums were not working, recovered.
+__version__= 'v3.1.5 26-03-16'# Setters for enums were not working, recovered.
 # SPV removed, PvDefs definitions simplified, new features added.
 #TODO: add support for autosave, (feature 'A'), caputLog (feature 'H') and access rights
 
