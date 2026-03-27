@@ -1,15 +1,18 @@
 """Helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
 __version__= 'v3.2.0 26-03-25'# NDArrays supported. Setters for enums were not working, recovered.
-# SPV removed, PvDefs definitions simplified, new features added.
-#TODO: add support for autosave, (feature 'A'), caputLog (feature 'H') and access rights
+#TODO: Deduct autosave directory from OPERATIONS environment variable, that is used for storing logs and other files related to the operations. That will allow to have a separate autosave directory for each operation, and avoid conflicts between different operations running on the same machine.
+#TODO:
+# 1) add support for NTTable, that can be useful for tabular data, for example, for multi-channel analyzers. 
+# 2) add support for more features in PV definitions, for example, format for displaying the value, precision for floating point values, etc. 
+# 3) add support for more data types, for example, string arrays, structured data with multiple fields, etc. 
+# 4) add support for more features in put handlers, for example, checking the type of the new value, checking the access rights of the client, etc. 5) add support for more features in PVs, for example, adding a timestamp to the value, adding a status to the value, etc.
 
 import sys
 import time
 from time import perf_counter as timer
 from datetime import datetime
 import os
-#import shelve
 import json
 import threading
 from socket import gethostname
@@ -128,7 +131,7 @@ def write_cache():
                 # for discrete PVs, we need to save the index of the current choice, not the choice itself, because the choices can be changed in the next startup. That is a good example of using extra parameters in PV definitions.
                 try:
                     pyval = value.index
-                except Exception as e:
+                except Exception:
                     pyval = value
             #print(f'Caching {pvName} = {value} of type {type(value)}, python value: {pyval} of type {type(pyval)}')
             pvcacheMap[pvName[len(C_.prefix):]] = {'value': pyval, 'time': time.time()}
@@ -154,7 +157,7 @@ def create_PVs(pvDefs, pvcache=None):
             sys.exit(1)
         extra = extra[0] if extra else {}
 
-        # 
+        # Check the validity of PV definition and prepare parameters for creating PV.
         iterable  = type(initial) not in (int,float,str)
         allowed_chars = 'WRAD'
         meta = extra.get('features','')
@@ -166,6 +169,7 @@ def create_PVs(pvDefs, pvcache=None):
                 printe(f'Unknown meta character {ch} in SPV definition')
                 sys.exit(1)
 
+        # 
         if isinstance(initial, np.ndarray):# Multi-dimensional array.
             printv(f'Creating NTNDArray PV {pname}, initial: {initial}')
             #TODO:ISSUE:spv = SharedPV(nt=p4p.nt.NTNDArray(display=True))# do not use initial here due to a bug in p4p, also display keyword is not handled.
@@ -174,11 +178,13 @@ def create_PVs(pvDefs, pvcache=None):
             spv.post(initial, timestamp=ts)
 
         else:# NtEnum or Scalar or 1D array.
-            if 'D' in meta:# discrete PV, that is a PV with a list of choices. The value of the PV is one of the choices. The initial value should be one of the choices or an index of the choice in the list.
+            if 'D' in meta:# discrete PV, that is a PV with a list of choices.
+                #The value of the PV is one of the choices.
                 initial = {'choices': initial, 'index': 0}
                 nt = p4p.nt.NTEnum(display=True, extra=ntextra)
             else:
-                # NTScalar or NTScalarArray, depending on whether initial value is iterable or not. The type is determined from the initial value, but it can be overridden by extra['type']. For discrete PVs, the type is always NTEnum, and the choices are taken from the initial value.
+                # NTScalar or NTScalarArray, depending on whether initial value is iterable or not.
+                # The type is determined from the initial value, but it can be overridden by extra['type'].
                 vtype = extra.get('type')
                 if vtype is None:
                     firstItem = initial[0] if iterable else initial
@@ -189,7 +195,8 @@ def create_PVs(pvDefs, pvcache=None):
                 nt = p4p.nt.NTScalar(prefix+tcode, display=True, control=writable,
                             valueAlarm = valueAlarm is not None, extra=ntextra)
 
-            # If the PV value is cached in pvcache, then use the cached value as initial value. That allows to restore PV values after server restart. For discrete PVs, we need to save the index of the current choice, not the choice itself, because the choices can be changed in the next startup. That is a good example of using extra parameters in PV definitions.
+            # If the PV value is cached in pvcache, then use the cached value as initial value.
+            # That allows to restore PV values after server restart.
             if pname in pvcache:
                 cached = pvcache[pname]['value']
                 if isinstance(initial, dict):
@@ -242,9 +249,7 @@ def create_PVs(pvDefs, pvcache=None):
                 vr = vv.raw.value
                 ntNamedTuples = spv._wrap(spv.current())
                 oldvr = ntNamedTuples['value']
-                #print(f'Put request for {spv.name} = {repr(vv)}, current value: {repr(ntNamedTuples)}')
-                # check limits, if they are defined. That will be a good
-                # example of using control structure and valueAlarm.
+                # check limits, if they are defined.
                 #print(f'Put request for {spv.name} = {repr(vr)}, value: {ntNamedTuples["value"]}, peer: {op.name()}, {op.peer()}, {op.account()}, {op.roles()}')
                 try:
                     limitLow = ntNamedTuples['control.limitLow']
@@ -338,6 +343,8 @@ def create_pvDefs(pvDefs=None, pvcache=None):
     """
     F,T,U,LL,LH = 'features','type','units','limitLow','limitHigh'
     C_.PVDefs = [
+
+# Mandatory PVs for all servers, that are created by default.
 # EPICS PVs for iocStats, see https://epics.anl.gov/base/R3-14/7-docs/iocstats.html
 ['HOSTNAME',    'Server host name',  gethostname()],
 ['VERSION',     'Program version',  'epicsdev '+__version__],
@@ -403,6 +410,9 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
     C_.prefix = prefix
     C_.verbose = verbose
 
+    # Check if the server is already running by trying to get the value of HOSTNAME PV.
+    # If it is accessible, then the server is already running, and we should exit to avoid conflicts.
+    # If it is not accessible, then we can proceed with creating PVs and starting the server.
     if serverStateChanged is not None:# set custom serverStateChanged function
         C_.serverStateChanged = serverStateChanged
     try: # check if server is already running
@@ -424,11 +434,12 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
         except Exception:
             print(f'WARNING: pvCache file {autosaveFile} not found. Using default values')
     if len(pvcache) == 0:
-        printi(f'Loading default values')
+        printi('Loading default values')
     else:
         printi(f'Loading initial values from {autosaveFile}')
         printv(f'pvCache: {pvcache}')
     pvs = create_pvDefs(pvDefs, pvcache)
+
     # Set up autosave if requested. That will save PV values to a file, and restore them on the next startup.
     if autosaveDir is not None:
         try:
@@ -440,19 +451,20 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
         C_.cachefd = open(autosaveFile, 'w')
         printi(f'Autosave enabled. Saving to {autosaveFile}')
     else:
-        printi(f'Autosave disabled')
+        printi('Autosave disabled')
 
+    # Set up putlogPV if requested. That will log put operations to a PV, which can be useful for auditing and debugging.
     C_.putlogPV = putlogPV
     if C_.putlogPV is not None:
         try:
             _ = IFace.get(putlogPV, timeout=0.5)
-            printi
+            printi(f'PutLog enabled. Logging put operations to {putlogPV}')
         except TimeoutError:
-            printw(f'WARNING: caPutLog feature will not work: PV {putlogPV} not accessible.')
+            printw(f'WARNING: PutLog feature will not work: PV {putlogPV} not accessible.')
     else:
-        printw('caPutLog feature disabled.')
+        printw('PutLog feature is disabled.')
 
-    # Save list of PVs to a file, if requested
+    # Save list of PVs to a file, if requested.
     if listDir != '':
         listDir = '/tmp/pvlist/' if listDir is None else listDir
         if not os.path.exists(listDir):
@@ -464,6 +476,7 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
                 f.write(_pvname + '\n')
     printi(f'Hosting {len(pvs)} PVs')
 
+    # Start the heartbeat thread, that will update heartbeat and uptime PVs.
     C_.startTime = time.time()
     threading.Thread(target=_heartbeat_thread, daemon=True).start()
     return pvs

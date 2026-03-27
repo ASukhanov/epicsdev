@@ -151,8 +151,8 @@ parser.add_argument('-i', '--index', default='0', help=
 # The rest of arguments are not essential, they can be changed at runtime using PVs.
 parser.add_argument('-n', '--npoints', type=int, default=100, help=
 'Number of points in the waveform')
-#parser.add_argument('-s', '--sleep', type=float, default=1.0, help=
-#'Sleep time per cycle')
+parser.add_argument('-p', '--putlogPV', default='putlog:dump', help=
+'Name of the PV where put operations are logged. If None, then put operations are not logged.')
 parser.add_argument('-v', '--verbose', action='count', default=0, help=
 'Show more log messages (-vv: show even more)') 
 pargs = parser.parse_args()
