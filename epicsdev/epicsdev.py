@@ -1,6 +1,6 @@
 """Helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v3.1.5 26-03-16'# Setters for enums were not working, recovered.
+__version__= 'v3.2.0 26-03-25'# NDArrays supported. Setters for enums were not working, recovered.
 # SPV removed, PvDefs definitions simplified, new features added.
 #TODO: add support for autosave, (feature 'A'), caputLog (feature 'H') and access rights
 
@@ -13,6 +13,7 @@ import os
 import json
 import threading
 from socket import gethostname
+import numpy as np
 import psutil
 import p4p.nt
 from p4p.server import Server
@@ -21,15 +22,18 @@ from p4p.client.thread import Context
 
 #``````````````````Constants
 PeriodicUpdateInterval = 10. # seconds
-AutosaveInterval = 10. # 
-AutosaveDefaultDirectory = '/operations/app_store/pvCache/' # Directory to save
-# autosave files. The actual file name will be <directory><prefix>.cache
+AutosaveInterval = 60. # seconds, interval for saving PV values to a file for autosave feature.
 IFace = Context('pva')# client context for getting values from other servers
 
-dtype2p4p = {# mapping from numpy dtype to p4p type code
+epics2p4p = {# mapping from epics type codes to p4p type codes.
 's8':'b', 'u8':'B', 's16':'h', 'u16':'H', 'i32':'i', 'u32':'I', 'i64':'l',
 'u64':'L', 'f32':'f', 'f64':'d', str:'s',
 }
+dtype2p4p = {# mapping from numpy dtype to p4p type code
+np.dtype('int8'):'b', np.dtype('uint8') :'B',
+np.dtype('int16'):'h', np.dtype('uint16'):'H', np.dtype('int32'):'i',
+np.dtype('uint32'):'I', np.dtype('int64'):'l', np.dtype('uint64'):'L',
+np.dtype('float32'):'f', np.dtype('float64'):'d'}
 
 #``````````````````Module Storage`````````````````````````````````````````````
 def _serverStateChanged(newState:str):
@@ -87,13 +91,6 @@ def printvv(msg):
 def printv3(msg):
     """Print debug message if verbosity level >=3."""
     _printv(msg, 3)
-
-# def nt2py(nt):
-#     """Convert nt value to python value. That is to convert p4p scalar types
-#      to python scalars, and leave other types unchanged."""
-#     ntmap = {p4p.nt.scalar.ntint:int, p4p.nt.scalar.ntfloat:float,
-#         p4p.nt.scalar.ntstr:str, p4p.nt.enum.ntenum: int}
-#     return ntmap[type(nt)](nt)
 
 def pvobj(pvName):
     """Return PV with given name"""
@@ -157,14 +154,8 @@ def create_PVs(pvDefs, pvcache=None):
             sys.exit(1)
         extra = extra[0] if extra else {}
 
-        # Determine PV type and create SharedPV
+        # 
         iterable  = type(initial) not in (int,float,str)
-        vtype = extra.get('type')
-        if vtype is None:
-            firstItem = initial[0] if iterable else initial
-            itype = type(firstItem)
-            vtype = {int:'i32', float:'f32'}.get(itype,itype)
-        tcode = dtype2p4p[vtype]
         allowed_chars = 'WRAD'
         meta = extra.get('features','')
         writable = 'W' in meta
@@ -174,52 +165,70 @@ def create_PVs(pvDefs, pvcache=None):
             if ch not in allowed_chars:
                 printe(f'Unknown meta character {ch} in SPV definition')
                 sys.exit(1)
-        if 'D' in meta:
-            initial = {'choices': initial, 'index': 0}
-            nt = p4p.nt.NTEnum(display=True, extra=ntextra)
-        else:
-            prefix = 'a' if iterable else ''
-            nt = p4p.nt.NTScalar(prefix+tcode, display=True, control=writable,
-                        valueAlarm = valueAlarm is not None, extra=ntextra)
-        if pname in pvcache:
-            cached = pvcache[pname]['value']
-            if isinstance(initial, dict):
-                initial['index'] = cached
-            else:
-                initial = cached
-            #printi(f'Loaded initial value for {pname} from autosave: {initial}')
-        #print(f'Creating PV {pname}, initial: {initial}')
-        spv = SharedPV(nt=nt, initial=initial)
-        spv.lastTimeSaved = 0.
-        spv.writable = writable
 
-        # Set initial value and description and add to the map of PVs
-        ivalue = spv.current()
+        if isinstance(initial, np.ndarray):# Multi-dimensional array.
+            printv(f'Creating NTNDArray PV {pname}, initial: {initial}')
+            #TODO:ISSUE:spv = SharedPV(nt=p4p.nt.NTNDArray(display=True))# do not use initial here due to a bug in p4p, also display keyword is not handled.
+            spv = SharedPV(nt=p4p.nt.NTNDArray())
+            spv.open(initial)
+            spv.post(initial, timestamp=ts)
+
+        else:# NtEnum or Scalar or 1D array.
+            if 'D' in meta:# discrete PV, that is a PV with a list of choices. The value of the PV is one of the choices. The initial value should be one of the choices or an index of the choice in the list.
+                initial = {'choices': initial, 'index': 0}
+                nt = p4p.nt.NTEnum(display=True, extra=ntextra)
+            else:
+                # NTScalar or NTScalarArray, depending on whether initial value is iterable or not. The type is determined from the initial value, but it can be overridden by extra['type']. For discrete PVs, the type is always NTEnum, and the choices are taken from the initial value.
+                vtype = extra.get('type')
+                if vtype is None:
+                    firstItem = initial[0] if iterable else initial
+                    itype = type(firstItem)
+                    vtype = {int:'i32', float:'f32'}.get(itype,itype)
+                tcode = epics2p4p[vtype]
+                prefix = 'a' if iterable else ''
+                nt = p4p.nt.NTScalar(prefix+tcode, display=True, control=writable,
+                            valueAlarm = valueAlarm is not None, extra=ntextra)
+
+            # If the PV value is cached in pvcache, then use the cached value as initial value. That allows to restore PV values after server restart. For discrete PVs, we need to save the index of the current choice, not the choice itself, because the choices can be changed in the next startup. That is a good example of using extra parameters in PV definitions.
+            if pname in pvcache:
+                cached = pvcache[pname]['value']
+                if isinstance(initial, dict):
+                    initial['index'] = cached
+                else:
+                    initial = cached
+                #printi(f'Loaded initial value for {pname} from autosave: {initial}')
+            printv(f'Creating PV {pname}, initial: {initial}')
+            spv = SharedPV(nt=nt, initial=initial)
+
+            # Set initial value and description and add to the map of PVs
+            ivalue = spv.current()
+            ntNamedTuples = spv._wrap(ivalue, timestamp=ts)
+            ntNamedTuples['display.description'] = desc
+            ntNamedTuples['features.writable'] = writable
+
+            # set extra parameters
+            for field in extra.keys():
+                try:
+                    if field in ['limitLow','limitHigh','format','units']:
+                        ntNamedTuples[f'display.{field}'] = extra[field]
+                        if field.startswith('limit'):
+                            ntNamedTuples[f'control.{field}'] = extra[field]
+                    if field == 'valueAlarm':
+                        for key,value in extra[field].items():
+                            ntNamedTuples[f'valueAlarm.{key}'] = value
+                except  KeyError as e:
+                    print(f'ERROR. Cannot set {field} for {pname}: {e}')
+                    sys.exit(1)
+            spv.post(ntNamedTuples)
         printv((f'created pv {pname}, initial: {type(ivalue),ivalue},'
-               f'extra: {extra}'))
+            f'extra: {extra}'))
         key = C_.prefix + pname
         if key in C_.PVs:
             printe(f'Duplicate PV name: {pname}')
             sys.exit(1)
         C_.PVs[C_.prefix+pname] = spv
-        ntNamedTuples = spv._wrap(ivalue, timestamp=ts)
-        ntNamedTuples['features.writable'] = writable
-        ntNamedTuples['display.description'] = desc
 
-        # set extra parameters
-        for field in extra.keys():
-            try:
-                if field in ['limitLow','limitHigh','format','units']:
-                    ntNamedTuples[f'display.{field}'] = extra[field]
-                    if field.startswith('limit'):
-                        ntNamedTuples[f'control.{field}'] = extra[field]
-                if field == 'valueAlarm':
-                    for key,value in extra[field].items():
-                        ntNamedTuples[f'valueAlarm.{key}'] = value
-            except  KeyError as e:
-                print(f'ERROR. Cannot set {field} for {pname}: {e}')
-                sys.exit(1)
-        spv.post(ntNamedTuples)
+        spv.writable = writable
 
         if writable:
             # add new attributes, that will be used in the put handler
@@ -263,8 +272,7 @@ def create_PVs(pvDefs, pvcache=None):
                     ip = op.peer().split(':')[3][:-1]# peer looks like: [::ffff:192.168.27.6]:46362
                     jmsg = {"date":dt[0], "time":dt[1], 
                         "host":ip, "user":op.account(),
-                        "pv":op.name(), "new":str(vr), "old":str(oldvr)}
-                    printv(f'Logging put operation: {jmsg}')
+                        "pv":op.name(), "new":vr, "old":oldvr}
                     s = json.dumps(jmsg)
                     try:
                         IFace.put(C_.putlogPV, "'"+s+"'", timeout=0.5)# quote the string to avoid interpreting it as JSON
@@ -406,16 +414,15 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
 
     # No existing server found. Creating PVs.
     pvcache = {}
-    if autosaveDir == '':# autosaveDir enabled with default file name
-        autosaveDir = AutosaveDefaultDirectory
-    if recall:
+    if autosaveDir == '':# --autosave not given: disable autosave
+        autosaveDir = None
+    if recall and autosaveDir is not None:
         try:
-            autosaveFile = f'{autosaveDir}{prefix[:-1]}.cache'
+            autosaveFile = os.path.join(autosaveDir, f'{prefix[:-1]}.cache')
             with open(autosaveFile, "r") as json_file:
                 pvcache = json.load(json_file)
         except Exception:
             print(f'WARNING: pvCache file {autosaveFile} not found. Using default values')
-    printv(f'AutosaveDir: {autosaveDir}, recall: {recall}')
     if len(pvcache) == 0:
         printi(f'Loading default values')
     else:
@@ -429,9 +436,21 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
         except PermissionError:
             printe(f'Permission denied to create {autosaveDir}. Use --autosave option.')
             sys.exit(1)
-        autosaveFile = f'{autosaveDir}{prefix[:-1]}.cache'
+        autosaveFile = os.path.join(autosaveDir, f'{prefix[:-1]}.cache')
         C_.cachefd = open(autosaveFile, 'w')
         printi(f'Autosave enabled. Saving to {autosaveFile}')
+    else:
+        printi(f'Autosave disabled')
+
+    C_.putlogPV = putlogPV
+    if C_.putlogPV is not None:
+        try:
+            _ = IFace.get(putlogPV, timeout=0.5)
+            printi
+        except TimeoutError:
+            printw(f'WARNING: caPutLog feature will not work: PV {putlogPV} not accessible.')
+    else:
+        printw('caPutLog feature disabled.')
 
     # Save list of PVs to a file, if requested
     if listDir != '':
@@ -444,17 +463,8 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
             for _pvname in pvs:
                 f.write(_pvname + '\n')
     printi(f'Hosting {len(pvs)} PVs')
+
     C_.startTime = time.time()
-
-    try:
-        if putlogPV is not None:
-            _ = IFace.get(putlogPV, timeout=0.5)
-            C_.putlogPV = putlogPV
-            printi(f'caPutLog feature enabled for PV {putlogPV}')
-    except TimeoutError:
-        printw(f'WARNING: caPutLog feature will not work: PV {putlogPV} not accessible.')
-        C_.putlogPV = None
-
     threading.Thread(target=_heartbeat_thread, daemon=True).start()
     return pvs
 
@@ -503,7 +513,6 @@ def sleep():
 
 #``````````````````Demo````````````````````````````````````````````````````````
 if __name__ == "__main__":
-    import numpy as np
     import argparse
 
     def myPVDefs():
@@ -521,11 +530,12 @@ if __name__ == "__main__":
 ['c01Waveform', 'Waveform array',           [0.], {U:'du'}],
 ['c01Mean',     'Mean of the waveform',     0., {U:'du'}],
 ['c01Peak2Peak','Peak-to-peak amplitude',   0., {U:'du', **alarm}],
+['image',       'Image array',              np.zeros([1], dtype='int16')],
 ['alarm',       'PV with alarm',            0, {U:'du', **alarm}],
         ]
+
     pargs = None
     rng = np.random.default_rng()
-    nPoints = 100
     _sum = {'points': 0, 'time': 0.}
 
     def set_recordLength(value, *_):
@@ -538,7 +548,6 @@ if __name__ == "__main__":
     def init(recordLength):
         """Example of device initialization function"""
         set_recordLength(recordLength)
-        #set_noise(pvv('noiseLevel')) # already called from set_recordLength
 
     def poll():
         """Example of polling function. Called every cycle when server is running.
@@ -552,6 +561,11 @@ if __name__ == "__main__":
         _sum['points'] += len(wf)
         publish('c01Peak2Peak', np.ptp(wf))
         publish('c01Mean', np.mean(wf))
+
+        # For demo purposes, we also publish the waveform as an image. That is not a typical use case, but it shows how to publish 2D arrays.
+        dim = int(np.sqrt(len(wf)))
+        array2d = (wf*10.)[:dim*dim].reshape([dim, dim])
+        publish('image', array2d.astype('int16'))
 
     def periodic_update():
         """Perform periodic update"""
@@ -570,8 +584,7 @@ if __name__ == "__main__":
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     epilog=f'{__version__}')
     parser.add_argument('-a', '--autosave', nargs='?', default='', help=
-'Autosave control. If not given, then autosave is enabled with default file '\
-'name /tmp/<device><index>.cache. ' \
+'Autosave control. If not given, then autosave is disabled. ' \
 'If given without argument, then autosave is disabled' \
 'If a file name is given, then it is used for autosave.')
     parser.add_argument('-c', '--recall', action='store_false', help=
@@ -584,7 +597,7 @@ if __name__ == "__main__":
 'Directory to save list of all generated PVs, if no directory is given, '
 'then </tmp/pvlist/><prefix> is assumed.'))
     # The rest of options are not essential, they can be controlled at runtime using PVs.
-    parser.add_argument('-n', '--npoints', type=int, default=nPoints, help=
+    parser.add_argument('-n', '--npoints', type=int, default=100, help=
 'Number of points in the waveform')
     parser.add_argument('-p', '--putlogPV', default='putlog:dump', help=
 'Name of the PV where put operations are logged. If None, then put operations are not logged.')
@@ -604,7 +617,7 @@ if __name__ == "__main__":
     set_server('Start')
 
     # Main loop
-    # In this example, we just update the waveform and its stats in a loop,
+    # In this example, we just update the waveform,image and its stats in a loop,
     # but in a real application, the loop can also read data from the device,
     # and update PVs accordingly. The loop can be paused by setting server PV to 'Stop',
     # and exited by setting server PV to 'Exit'. 
