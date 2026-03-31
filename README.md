@@ -2,6 +2,8 @@
 
 Helper module for building **EPICS PVAccess servers** using [p4p](https://github.com/epics-base/p4p).
 
+Read more: [Why Python-based servers are essential for large EPICS facility like future EIC](https://github.com/eicorg/docs/blob/master/python-development/epics_development_with_python_and_ai.md).
+
 `epicsdev` is designed for:
 
 * Rapid PVAccess server development
