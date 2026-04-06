@@ -1,157 +1,223 @@
 # epicsdev
 
-Helper module for building **EPICS PVAccess servers** using [p4p](https://github.com/epics-base/p4p).
+`epicsdev` is a small Python toolkit for building **EPICS PVAccess** servers with
+[p4p](https://github.com/epics-base/p4p).
 
-Read more: [Why Python-based servers are essential for large EPICS facility like future EIC](https://github.com/eicorg/docs/blob/master/python-development/epics_development_with_python_and_ai.md).
+It is intended for fast development of simulated devices, instrument front ends,
+and stress-test servers that publish scalars, waveforms, and images.
 
-`epicsdev` is designed for:
+Background reading:
+[Why Python-based servers are essential for large EPICS facility like future EIC](https://github.com/eicorg/docs/blob/master/python-development/epics_development_with_python_and_ai.md)
 
-* Rapid PVAccess server development
-* High-rate data simulation and stress testing
-* GUI-based monitoring and control
-* Rapid instrument integration
-* AI-assisted automatic device support generation
+## What `epicsdev` provides
 
-It integrates following EPICS IOC services:<br>
-* **Autosave**: automatically saves the values of EPICS process variables (PVs) to files on a server host, and restores those values when the server restarts.
-* **IocStats**: provides support for PVs that show the health and status of the server, plus a few control PVs.
-* **caPutLog**: logging of PVAccess **`put`** operations.
----
+- A simple API for defining and hosting PVs
+- Built-in IOC-style helper PVs for status and basic statistics
+- Autosave/restore of writable PV values
+- Optional logging of `put` operations to a separate PV
+- Example applications for waveforms, images, and text logging
+
+In practice, it combines a Python helper library with a few services commonly
+expected from EPICS IOCs:
+
+- **Autosave**: save writable PV values and restore them on restart
+- **IOC-stats-style PVs**: host name, uptime, heartbeat, CPU load, and related PVs
+- **Put logging**: optional forwarding of `put` activity to a logging PV
+
+## Package contents
+
+| Module | Purpose |
+| --- | --- |
+| `epicsdev.epicsdev` | Core helper functions for creating PVAccess servers |
+| `epicsdev.imagegen` | Synthetic image generator for high-throughput testing |
+| `epicsdev.putlog` | Text logger driven by a writable PV |
+| `config/` | Example `pypeto` pages and a Phoebus display |
 
 ## Installation
+
+Install the base package:
 
 ```bash
 python -m pip install epicsdev
 ```
-## Quick Demo
 
-Start the demo PVAccess server:
-
-```bash
-python -m epicsdev.epicsdev
-```
-### Control & Visualization
-
-Install optional GUI and plotting tools:
+Optional tools for GUI pages and plotting:
 
 ```bash
 python -m pip install pypeto pvplot
 ```
 
-Launch the control interface:
+## Quick start
+
+Start the built-in demo server:
+
+```bash
+python -m epicsdev.epicsdev
+```
+
+The demo uses the default PV prefix:
+
+```text
+epicsDev0:
+```
+
+### Open the example control page
 
 ```bash
 python -m pypeto -c config -f epicsdev
 ```
 
-This provides:
+This page gives you:
 
-* Device control panel
-* Live waveform plots
-* Real-time parameter monitoring
+- basic server control
+- live parameter monitoring
+- waveform plotting helpers
 
-The screenshots can be seen here: [control page](docs/epicsdev_pypet.png), [plots](docs/epicsdev_pvplot.jpg).
+Screenshots:
 
-### Phoebus Display
+- [pypeto control page](docs/epicsdev_pypet.png)
+- [pvplot example](docs/epicsdev_pvplot.jpg)
 
-An example Phoebus display is provided: `config/epicsdev.bob`. [Screenshot](docs/phoebus_epicsdev.jpg).
+### Phoebus display
 
-## Image generator
+An example Phoebus display file is included at [config/epicsdev.bob](config/epicsdev.bob).
+Screenshot: [Phoebus display](docs/phoebus_epicsdev.jpg)
 
-`epicsdev.imagegen` generates high-throughput synthetic 2D data for stress-testing EPICS systems.
+## Minimal programming model
 
-For example, the following command :
-```bash
-python -m epicsdev.imagegen -c -s'10000,1000'
-```
-Will start a server, which generates :
-* noisy image with 10,000 rows and 1000 columns
-* 10,000 PVs of 1000-point int16 waveforms
+The typical workflow is:
 
-Updating performace is 58,000 waveforms/s, or 116 MB/s.
+1. define PVs
+2. initialize the server with `init_epicsdev()`
+3. start a `p4p.server.Server`
+4. publish updates from your polling loop
 
-### View with pyqtgraph
+PV definitions are lists with this shape:
 
 ```python
-import pyqtgraph as pg
-from p4p.client.thread import Context
-iface = Context('pva')
-
+[name, description, initial_value, extra]
 ```
 
-## Multi-Channel Waveform Generator
+Where `extra` is optional and may include keys such as:
 
-`epicsdev.multiadc` generates high-throughput synthetic data for stress-testing EPICS systems.
+- `features`: PV features such as writable or discrete
+- `type`: explicit EPICS type, for example `u32` or `f32`
+- `units`: engineering units
+- `limitLow`, `limitHigh`: write limits
+- `setter`: callback invoked on writes
+- `valueAlarm`: value alarm configuration
 
-For example, the following command :
+Minimal example:
+
+```python
+from p4p.server import Server
+from epicsdev.epicsdev import init_epicsdev, publish, pvv, set_server, sleep
+
+pv_defs = [
+   ["temperature", "Simulated temperature", 25.0, {"features": "W", "units": "C"}],
+   ["waveform", "Example waveform", [0.0], {"units": "V"}],
+]
+
+pvs = init_epicsdev("demo0:", pv_defs, verbose=1)
+server = Server(providers=[pvs])
+set_server("Start")
+
+while True:
+   publish("temperature", pvv("temperature") + 0.01)
+   if not sleep():
+      pass
+```
+
+## Example applications
+
+### `epicsdev.imagegen`
+
+`imagegen` generates synthetic 2D images with a grid of Gaussian blobs and
+optional per-row PVs.
+
+Example:
+
 ```bash
-python -m epicsdev.multiadc -s 0.1 -c 10000 -n 100
+python -m epicsdev.imagegen -gr -s 10000,1000
 ```
-Will start a server, which generates:
 
-* **10,000** noisy waveforms per second
-* **100 points per waveform**
-* **40,000 scalar parameters per second**
+This starts a server that publishes:
 
-### Monitoring GUI
+- a noisy image
+- PVs that control image size, blob count, blob width, and noise level
+- 10,000 of dynamicaly-changed waveform int16 PVs, each representing 1000-point row.
+- The publishing performance is 55,000 of PVs per second (110 MB/s).
 
-```bash
-python -m pypeto -c config -f multiadc
-```
-## Text Put Logger
+The generated data is intended for high-throughput testing of EPICS clients,
+transport, and visualization tools.
 
-`epicsdev.putlog` hosts a writable PV named `dump` and appends any written text to a file.
+### `epicsdev.putlog`
 
-Start the logger server (required argument: output file path):
+`putlog` hosts a writable PV named `dump` and appends received text to a file.
+
+Start the logger:
 
 ```bash
 python -m epicsdev.putlog /tmp/putlog.txt
 ```
 
-Default PV prefix is `putlog0:`, so write text to:
+By default, the logger prefix is:
+
+```text
+putlog0:
+```
+
+Write text to it with:
 
 ```bash
 pvput putlog0:dump "hello from client"
 ```
----
-## AI-Assisted Device Support Development
 
-`epicsdev` is structured to enable automated server generation using AI tools such as GitHub Copilot.
+## Notes on autosave and helper PVs
 
-### Workflow Example
+When you initialize a server with `init_epicsdev()`, `epicsdev` automatically
+adds a standard set of helper PVs before your application-specific PVs. These
+include PVs such as:
 
-1. Create a new GitHub repository.
+- `HOSTNAME`
+- `VERSION`
+- `HEARTBEAT`
+- `UPTIME`
+- `CPU_LOAD`
+- `status`
+- `server`
+- `verbose`
+- `sleep`
+- `cycle`
+- `cycleTime`
 
-2. Provide an AI prompt such as:
+Writable PV values can be stored in an autosave file and restored on restart.
+This makes `epicsdev` practical for interactive development and lab setups
+where operator-tuned values should survive process restarts.
 
-   ```
-   Build device support for Tektronix MSO oscilloscopes 
-   using epicsdev_rigol_scope as a template and the 
-   programming manual available at <PDF link>.
-   ```
+## AI-assisted device support workflow
 
-3. Within ~20–40 minutes, the AI can generate a pull request.
+`epicsdev` is intentionally small and explicit, which makes it convenient for
+AI-assisted code generation and device support prototyping.
 
-4. Review, test, make minor corrections if needed, then merge.
+Typical workflow:
 
-### Real-World Example
+1. identify a device API or programming manual
+2. define PVs and their setter callbacks
+3. generate a first server implementation from an existing `epicsdev` example
+4. review, test, and refine
 
-Using this method, a server implementation for [Tektronix MSO oscilloscopes](https://github.com/ASukhanov/epicsdev_tektronix) was:
-
-* ~99% correct on first generation
-* Required only minor adjustments
-
----
+One example built this way is
+[epicsdev_tektronix](https://github.com/ASukhanov/epicsdev_tektronix).
 
 ## Requirements
 
-* Python 3.8+
-* p4p 4.2.2+
+- Python 3.7+
+- `p4p>=4.2.2`
+- `psutil`
 
 Optional:
 
-* pypeto
-* pvplot
-* Phoebus (for .bob display files)
-
----
+- `pypeto`
+- `pvplot`
+- Phoebus for `.bob` display files

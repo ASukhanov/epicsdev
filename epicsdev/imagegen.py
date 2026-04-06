@@ -2,9 +2,11 @@
 Generates an image with a grid of noisy Gaussian blobs, with parameters 
 defined by PVs. 
 The image is recomputed and published when the parameters are changed via PVs. 
-Random normal noise is added to the image on each update, without changing the underlying blob pattern.
+Random normal noise is added to the image on each update, without changing 
+the underlying blob pattern.
 PVs representing image rows and statistics PVs are updated periodically.
 """
+# pylint: disable=invalid-name
 __version__= 'v0.0.2 26-04-02'# added row PVs, periodic performance metrics printout, and some refactoring.
 import argparse
 from time import perf_counter as timer
@@ -159,7 +161,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument("-a", "--autosave", nargs="?", default="")
 parser.add_argument("-c", "--recall", action="store_false")
 parser.add_argument("-d", "--device", default="image")
-parser.add_argument("-g", "--generate", default="r",help=
+parser.add_argument("-g", "--generate", nargs="?", default="", help=
     "Generate array PVs on startup: 'r' for row, 's' for statistics'"                    )
 parser.add_argument("-i", "--index", default="0")
 parser.add_argument("-s", "--shape", default="120,120", help=

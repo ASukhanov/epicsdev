@@ -165,7 +165,11 @@ def create_PVs(pvDefs, pvcache=None):
                 printe(f'Unknown meta character {ch} in SPV definition')
                 sys.exit(1)
 
-        # 
+        # Create PV. For multi-dimensional arrays, we always create NTNDArray,
+        # that is the most flexible type, and supports all features.
+        # For other types, we create NTEnum for discrete PVs, and NTScalar
+        # or NTScalarArray for other PVs, depending on whether the initial 
+        # value is iterable or not.
         if isinstance(initial, np.ndarray):# Multi-dimensional array.
             printv(f'Creating NTNDArray PV {pname}, initial: {initial}')
             #TODO:ISSUE:spv = SharedPV(nt=p4p.nt.NTNDArray(display=True))# do not use initial here due to a bug in p4p, also display keyword is not handled.
@@ -238,7 +242,9 @@ def create_PVs(pvDefs, pvcache=None):
             spv.name = pname
             spv.setter = extra.get('setter')
 
-            # add a put handler
+            # add a put handler to the PV, that will be called when the PV 
+            # value is changed by a client. The handler will check limits, 
+            # call the setter if defined, and update subscribers.
             @spv.put
             def handle(spv, op):
                 vv = op.value()
@@ -246,7 +252,6 @@ def create_PVs(pvDefs, pvcache=None):
                 ntNamedTuples = spv._wrap(spv.current())
                 oldvr = ntNamedTuples['value']
                 # check limits, if they are defined.
-                #print(f'Put request for {spv.name} = {repr(vr)}, value: {ntNamedTuples["value"]}, peer: {op.name()}, {op.peer()}, {op.account()}, {op.roles()}')
                 try:
                     limitLow = ntNamedTuples['control.limitLow']
                     limitHigh = ntNamedTuples['control.limitHigh']
