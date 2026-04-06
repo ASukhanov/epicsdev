@@ -1,12 +1,7 @@
 """Helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v3.2.0 26-03-25'# NDArrays supported. Setters for enums were not working, recovered.
-#TODO: Deduct autosave directory from OPERATIONS environment variable, that is used for storing logs and other files related to the operations. That will allow to have a separate autosave directory for each operation, and avoid conflicts between different operations running on the same machine.
-#TODO:
-# 1) add support for NTTable, that can be useful for tabular data, for example, for multi-channel analyzers. 
-# 2) add support for more features in PV definitions, for example, format for displaying the value, precision for floating point values, etc. 
-# 3) add support for more data types, for example, string arrays, structured data with multiple fields, etc. 
-# 4) add support for more features in put handlers, for example, checking the type of the new value, checking the access rights of the client, etc. 5) add support for more features in PVs, for example, adding a timestamp to the value, adding a status to the value, etc.
+__version__= 'v3.2.1 26-03-28'# Env. variable OPERATIONS is used for default autosave directory
+#TODO: Add CBOR-encoded PVs representing arbitrary Python objects, that can be used for storing complex data structures, such as dictionaries, numpy arrays. That will be more efficient than using multiple PVs for each parameter, and more flexible than using JSON-encoded strings.
 
 import sys
 import time
@@ -26,6 +21,7 @@ from p4p.client.thread import Context
 #``````````````````Constants
 PeriodicUpdateInterval = 10. # seconds
 AutosaveInterval = 60. # seconds, interval for saving PV values to a file for autosave feature.
+AutosaveDefaultDirectory = '/operations/app_store/pvCache/' # Fallback autosave directory when OPERATIONS is not set.
 IFace = Context('pva')# client context for getting values from other servers
 
 epics2p4p = {# mapping from epics type codes to p4p type codes.
@@ -398,7 +394,7 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
     serverStateChanged is a function that will be called when the server state changes. It should have the signature:
         def serverStateChanged(newState:str):
         where newState is the new state of the server ('Start', 'Stop', 'Exit', 'Clear').
-    listDir is a string that specifies the directory where the list of PVs will be saved. If None, then no list will be saved.
+    listDir is a string that specifies the directory where the list of PVs will be saved. If '', then no list will be saved.
     autosaveDir is a string that specifies the directory where the autosave file will be saved. If None, then no autosave will be performed.
     recall is a boolean that specifies whether to load initial values from the autosave file. If False, then the initial values will be taken from the PV definitions.
     """
@@ -424,8 +420,12 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
 
     # No existing server found. Creating PVs.
     pvcache = {}
-    if autosaveDir == '':# --autosave not given: disable autosave
-        autosaveDir = None
+    if autosaveDir == '':# --autosave not given: use env-based default if available
+        operations_dir = os.getenv('OPERATIONS')
+        if operations_dir:
+            autosaveDir = os.path.join(operations_dir, 'app_store', 'pvCache')
+        else:
+            autosaveDir = AutosaveDefaultDirectory
     if recall and autosaveDir is not None:
         try:
             autosaveFile = os.path.join(autosaveDir, f'{prefix[:-1]}.cache')
@@ -461,6 +461,7 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
             printi(f'PutLog enabled. Logging put operations to {putlogPV}')
         except TimeoutError:
             printw(f'WARNING: PutLog feature will not work: PV {putlogPV} not accessible.')
+            C_.putlogPV = None
     else:
         printw('PutLog feature is disabled.')
 
@@ -543,7 +544,8 @@ if __name__ == "__main__":
 ['c01Waveform', 'Waveform array',           [0.], {U:'du'}],
 ['c01Mean',     'Mean of the waveform',     0., {U:'du'}],
 ['c01Peak2Peak','Peak-to-peak amplitude',   0., {U:'du', **alarm}],
-['image',       'Image array',              np.zeros([1], dtype='int16')],
+['waveform',    'int16 waveform',           [0], {T:'u16', U:'du'}],
+['image',       'Image array',              np.zeros((1,1), dtype='int16')],
 ['alarm',       'PV with alarm',            0, {U:'du', **alarm}],
         ]
 
@@ -570,6 +572,7 @@ if __name__ == "__main__":
         wf += pvv('c01Offset')
         ts = timer()        
         publish('c01Waveform', wf)
+        publish('waveform', wf*10)
         _sum['time'] += timer() - ts
         _sum['points'] += len(wf)
         publish('c01Peak2Peak', np.ptp(wf))
@@ -597,7 +600,9 @@ if __name__ == "__main__":
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     epilog=f'{__version__}')
     parser.add_argument('-a', '--autosave', nargs='?', default='', help=
-'Autosave control. If not given, then autosave is disabled. ' \
+'Autosave control. If not given, then autosave is enabled with default '
+'directory $OPERATIONS/app_store/pvCache when OPERATIONS is defined, '
+'otherwise /operations/app_store/pvCache. ' \
 'If given without argument, then autosave is disabled' \
 'If a file name is given, then it is used for autosave.')
     parser.add_argument('-c', '--recall', action='store_false', help=

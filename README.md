@@ -56,6 +56,29 @@ The screenshots can be seen here: [control page](docs/epicsdev_pypet.png), [plot
 
 An example Phoebus display is provided: `config/epicsdev.bob`. [Screenshot](docs/phoebus_epicsdev.jpg).
 
+## Image generator
+
+`epicsdev.imagegen` generates high-throughput synthetic 2D data for stress-testing EPICS systems.
+
+For example, the following command :
+```bash
+python -m epicsdev.imagegen -c -s'10000,1000'
+```
+Will start a server, which generates :
+* noisy image with 10,000 rows and 1000 columns
+* 10,000 PVs of 1000-point int16 waveforms
+
+Updating performace is 58,000 waveforms/s, or 116 MB/s.
+
+### View with pyqtgraph
+
+```python
+import pyqtgraph as pg
+from p4p.client.thread import Context
+iface = Context('pva')
+
+```
+
 ## Multi-Channel Waveform Generator
 
 `epicsdev.multiadc` generates high-throughput synthetic data for stress-testing EPICS systems.
@@ -69,7 +92,6 @@ Will start a server, which generates:
 * **10,000** noisy waveforms per second
 * **100 points per waveform**
 * **40,000 scalar parameters per second**
-
 
 ### Monitoring GUI
 
