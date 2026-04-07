@@ -7,7 +7,7 @@ the underlying blob pattern.
 PVs representing image rows and statistics PVs are updated periodically.
 """
 # pylint: disable=invalid-name
-__version__= 'v0.0.2 26-04-02'# added row PVs, periodic performance metrics printout, and some refactoring.
+__version__= 'v0.1.0 26-04-07'# added plobSigmaX and Y.
 import argparse
 from time import perf_counter as timer
 import numpy as np
@@ -52,9 +52,8 @@ def _gaussian_blob_grid_image() -> np.ndarray:
     n_blobs_x = int(pvv("nBlobsX"))
     n_blobs_y = int(pvv("nBlobsY"))
     blob_max = float(pvv("blobMax"))
-    sigma = float(pvv("blobSigma"))
-    sigmax = sigma
-    sigmay = sigma / (n_blobs_y/4) * n_rows/120# Adjust sigmaY based on number of blobs and image size, to keep blobs visually similar when changing these parameters.
+    sigmax = float(pvv("blobSigmaX"))
+    sigmay = float(pvv("blobSigmaY"))
 
     yy, xx = np.indices((n_rows, n_cols), dtype=np.float32)
     image = np.zeros((n_rows, n_cols), dtype=np.float32)
@@ -66,16 +65,10 @@ def _gaussian_blob_grid_image() -> np.ndarray:
         y_centers = np.linspace(dy, n_rows - dy, n_blobs_y, dtype=np.float32)
         print(f"Blob centers X: {x_centers}, Y: {y_centers}")
 
-        if sigma <= 0:
-            for cx in x_centers:
-                for cy in y_centers:
-                    image[int(round(cy)), int(round(cx))] += blob_max
-        else:
-            #denom = 2.0 * sigma * sigma
-            for cx in x_centers:
-                for cy in y_centers:
-                    r2 = (xx - cx) ** 2 / (sigmax * sigmax) + (yy - cy) ** 2 / (sigmay * sigmay)
-                    image += blob_max * np.exp(-r2)
+        for cx in x_centers:
+            for cy in y_centers:
+                r2 = (xx - cx) ** 2 / (sigmax * sigmax) + (yy - cy) ** 2 / (sigmay * sigmay)
+                image += blob_max * np.exp(-r2)
     return image
 
 def publish_image() -> None:
@@ -106,7 +99,9 @@ def my_pv_defs():
             {F: "W", LL: 0, LH: 100, SET: _set_and_regenerate},],
 ["blobMax","Blob maximum", 1000,
             {F: "W", LL: 0, LH: 65535, SET: _set_and_regenerate},],
-["blobSigma","Blob sigma", 4.0,
+["blobSigmaX","Blob sigma X", 4.0,
+            {F: "W", LL: 0.1, LH: 1000.0, SET: _set_and_regenerate},],
+["blobSigmaY","Blob sigma Y", 4.0,
             {F: "W", LL: 0.1, LH: 1000.0, SET: _set_and_regenerate},],
 ["noiseLevel","Noise level", 10.0,
             {F: "W", LL: 0.0, LH: 1000.0, SET: _set_and_regenerate},],
