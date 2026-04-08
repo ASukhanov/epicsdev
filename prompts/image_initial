@@ -1,0 +1,12 @@
+Create new program called image.py, based on epicsdev module serving following PVs:
+1) nRows: 'Number of rows in the image', default 10, minimum 10, maximum 10000.
+2) nCols: 'Number of columns in the image', default 100, minimum 100, maximum 1000.
+3) nBlobsX: 'Number of blobs along X axis', default 4, minimum 0, maximum 10.
+4) nBlobsY: 'Number of blobs along y axis', default 4, minimum 0, maximum 10.
+5) blobMax: 'Blob maximum', default 1000, minimum 0, maximum 65535.
+6) blobSigma: 'Blob sigma', default 4, minimum 0, maximum 1000.
+7) noiseLevel: 'Noise level', default 10., minimum 0.0, maximum 1000.0.
+8) image: 'Image', initialized as np.zeros((nRows,nCols), dtype='int16').
+
+Initialize PV('image') with a grid (nBlobsX * nBlobsY) of Gaussian blobs.
+Each Gaussian should have a maximum value equal to blobMax and width (sigma) equal to blobSigma.

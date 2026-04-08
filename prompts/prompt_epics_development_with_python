@@ -1,0 +1,9 @@
+Create epics_development_with_python_and_ai.md file in docs directory.
+Describe how epicsdev module simplifies the device support development in EPICS.
+Describe program options --autosave, --recall, --putlog.
+Describe which mandatory PVs are served for EPICS iocStats functionality.
+Describe how PVs are defined, how Nominative types automatically deducted from initial value.
+Describe main loop.
+Describe how to use the 'server' PV and sleep() function.
+
+
