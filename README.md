@@ -107,6 +107,38 @@ Where `extra` is optional and may include keys such as:
 - `setter`: callback invoked on writes
 - `valueAlarm`: value alarm configuration
 
+### Nominal Type (NT) selection from `initial_value`
+
+`epicsdev` selects the underlying PV normative type from `initial_value`
+(unless overridden by `extra["type"]`).
+
+Current behavior:
+
+| `initial_value` | `features` | Chosen NT | Notes |
+| --- | --- | --- | --- |
+| NumPy `ndarray` | any | `NTNDArray` | Current implementation routes any NumPy array to `NTNDArray`. |
+| list of choices | contains `D` | `NTEnum` | Value is stored as `{choices, index}`; initial index is 0. |
+| scalar (`int`, `float`, `str`) | no `D` | `NTScalar` | Default scalar mappings: `int -> i32`, `float -> f32`, `str -> s`. |
+| iterable (for example list/tuple) | no `D` | `NTScalarArray` | Element type is inferred from the first item. |
+
+Type-code mapping follows p4p scalar codes (for example `i32`, `u32`, `f32`,
+`f64`, `s8`, ...). You can force a specific type using `extra["type"]`.
+
+Examples:
+
+- `42` -> `NTScalar(i32)`
+- `3.14` -> `NTScalar(f32)`
+- `[1, 2, 3]` -> `NTScalarArray(i32)`
+- `['OFF', 'ON']` with `{"features": "D"}` -> `NTEnum`
+- `np.zeros((120, 120), dtype=np.int16)` -> `NTNDArray`
+
+Notes:
+
+- For discrete PVs (`D`), autosave stores the enum **index** rather than the
+   choice text, so updated choice lists can still be restored predictably.
+- For iterable non-NumPy values, keep the initial sequence non-empty so element
+   type inference is unambiguous.
+
 Minimal example:
 
 ```python
