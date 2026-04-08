@@ -4,7 +4,7 @@ This page lists the main runnable programs in `epicsdev`.
 
 ## `epicsdev.epicsdev`
 
-Generic/demo PVAccess server framework.
+Core helper library with a built-in demo server.
 
 Run:
 
@@ -12,19 +12,31 @@ Run:
 python -m epicsdev.epicsdev
 ```
 
-## `epicsdev.multiadc`
+What it demonstrates:
 
-Multi-channel waveform generator for load and stress testing.
+- framework helper PVs (`server`, `status`, `sleep`, `cycle`, `cycleTime`, ...)
+- scalar, waveform, and image PVs
+- periodic publishing loop and autosave behavior
+
+## `epicsdev.imagegen`
+
+High-throughput image generator variant used for stress/performance testing.
 
 Run:
 
 ```bash
-python -m epicsdev.multiadc
+python -m epicsdev.imagegen -gr -s 10000,1000
 ```
+
+Notes:
+
+- `-g r` publishes per-row waveform PVs (`row0`, `row1`, ...)
+- `-g s` publishes row statistics (`mean*`, `std*`, `peak2peak*`)
 
 ## `epicsdev.putlog`
 
-Hosts writable PV `dump`; every value written to it is appended to a file.
+Text logger server: writable PV `dump`; each received value is appended to a
+log file.
 
 Run:
 
@@ -35,11 +47,11 @@ python -m epicsdev.putlog /tmp/putlog.txt
 Default writable PV name:
 
 ```text
-putlog0:dump
+putlog:dump
 ```
 
 Example write:
 
 ```bash
-caput -p pva putlog0:dump "hello from client"
+pvput putlog:dump "hello from client"
 ```

@@ -135,13 +135,7 @@ while True:
 `imagegen` generates synthetic 2D images with a grid of Gaussian blobs and
 optional per-row PVs.
 
-Example:
-
-```bash
-python -m epicsdev.imagegen -gr -s 10000,1000
-```
-
-This starts a server that publishes:
+It publishes:
 
 - a noisy image
 - PVs that control image size, blob count, blob width, and noise level
@@ -150,6 +144,8 @@ This starts a server that publishes:
 
 The generated data is intended for high-throughput testing of EPICS clients,
 transport, and visualization tools.
+
+[example](docs/using_imagegen.md)
 
 ### `epicsdev.putlog`
 
