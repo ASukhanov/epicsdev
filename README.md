@@ -107,7 +107,7 @@ Where `extra` is optional and may include keys such as:
 - `setter`: callback invoked on writes
 - `valueAlarm`: value alarm configuration
 
-### Nominal Type (NT) selection from `initial_value`
+### Normative Type (NT) selection from `initial_value`
 
 `epicsdev` selects the underlying PV normative type from `initial_value`
 (unless overridden by `extra["type"]`).
