@@ -1,11 +1,11 @@
 # Working with epicsdev.imagegen
 
-Start epicsdev.imagegen for image generation with 10000*1000 pixels 
+Start epicsdev.imagegen for image generation with 10000*1000 16-bit pixels:
 ```bash
 python -m epicsdev.imagegen -c -gr -s10000,1000
 ```
 
-Start python interpreter in another terminal
+Start python interpreter in another terminal:
 ```python
 from p4p.client.thread import Context
 import pyqtgraph as pg
@@ -22,4 +22,4 @@ iface.put('image0:noiseLevel',100); show()
 Click ROI and position the region of interest.
 Click Color gradient and select 'flame'.
 
-[imageView](./imagegen.jpg)
+![imageView](./imagegen.jpg)
