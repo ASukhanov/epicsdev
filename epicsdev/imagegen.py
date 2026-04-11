@@ -7,13 +7,14 @@ the underlying blob pattern.
 PVs representing image rows and statistics PVs are updated periodically.
 """
 # pylint: disable=invalid-name
-__version__= 'v0.1.0 26-04-07'# added plobSigmaX and Y.
-import argparse
+__version__= 'v0.1.1 26-04-11'# gridCsalex sclales image with respect to the center of the image
+
 from time import perf_counter as timer
+import argparse
 import numpy as np
-from p4p.server import Server
 
 from epicsdev.epicsdev import (
+    Server,
     init_epicsdev,
     printi,
     publish,
@@ -62,6 +63,9 @@ def _gaussian_blob_grid_image() -> np.ndarray:
     dy = n_rows / (n_blobs_y)/2 if n_blobs_y > 0 else n_rows
     if n_blobs_x > 0 and n_blobs_y > 0 and blob_max > 0:
         x_centers = pvv('gridScaleX') * np.linspace(dx, n_cols - dx, n_blobs_x, dtype=np.float32)
+        print(f"Blob centers X before scaling: {x_centers}")
+        x_centers += n_cols/2. * (1 - pvv('gridScaleX')) # Scale centers with respect to the center of the image
+        print(f"Blob centers X after scaling: {x_centers}")
         y_centers = np.linspace(dy, n_rows - dy, n_blobs_y, dtype=np.float32)
         print(f"Blob centers X: {x_centers}, Y: {y_centers}")
 
