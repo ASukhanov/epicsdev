@@ -1,6 +1,6 @@
 """Helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v3.2.1 26-03-28'# Env. variable OPERATIONS is used for default autosave directory
+__version__= 'v3.2.2 26-04-11'# Notification about autosave permission.
 #TODO: Add CBOR-encoded PVs representing arbitrary Python objects, that can be used for storing complex data structures, such as dictionaries, numpy arrays. That will be more efficient than using multiple PVs for each parameter, and more flexible than using JSON-encoded strings.
 
 import sys
@@ -450,7 +450,7 @@ def init_epicsdev(prefix:str, pvDefs:list, verbose=0, serverStateChanged=None,
         try:
             os.makedirs(autosaveDir, exist_ok=True)
         except PermissionError:
-            printe(f'Permission denied to create {autosaveDir}. Use --autosave option.')
+            printe(f'Permission denied to create {autosaveDir}. You can define the root directory in OPERATIONS environment variable or disable autosaving.')
             sys.exit(1)
         autosaveFile = os.path.join(autosaveDir, f'{prefix[:-1]}.cache')
         C_.cachefd = open(autosaveFile, 'w')
