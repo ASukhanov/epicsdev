@@ -1,6 +1,6 @@
 """Helper functions for creating EPICS PVAccess server"""
 # pylint: disable=invalid-name
-__version__= 'v3.2.2 26-04-11'# Notification about autosave permission.
+__version__= 'v3.3.0 26-05-13'# Do not publish PV in its setter.
 #TODO: Add CBOR-encoded PVs representing arbitrary Python objects, that can be used for storing complex data structures, such as dictionaries, numpy arrays. That will be more efficient than using multiple PVs for each parameter, and more flexible than using JSON-encoded strings.
 
 import sys
@@ -251,6 +251,12 @@ def create_PVs(pvDefs, pvcache=None):
                 vr = vv.raw.value
                 ntNamedTuples = spv._wrap(spv.current())
                 oldvr = ntNamedTuples['value']
+                try: # if it is ENum
+                    index = oldvr.index
+                    oldvr = oldvr.choices[index]
+                except: pass
+                #printv(f'oldvr: {type(oldvr)},{oldvr}')
+
                 # check limits, if they are defined.
                 try:
                     limitLow = ntNamedTuples['control.limitLow']
@@ -265,14 +271,12 @@ def create_PVs(pvDefs, pvcache=None):
                     vr = str(vv)
                 if spv.setter:
                     spv.setter(vr, spv)
-                    # value will be updated by the setter, so get it again
-                    vr = pvv(spv.name)
-                    #vr = spv._wrap(spv.current())['value']
-                printv(f'putting {spv.name} = {vr}')
+                #printv(f'putting {spv.name} = {type(vr)} {vr}')
                 ct = time.time()
                 C_.lastPutTime = ct
                 spv.post(vr, timestamp=ct) # update subscribers
 
+                #printv(f'putlog {spv.name} = {type(vr)} {vr}')
                 if C_.putlogPV is not None:
                     dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3].split()
                     ip = op.peer().split(':')[3][:-1]# peer looks like: [::ffff:192.168.27.6]:46362
@@ -292,7 +296,6 @@ def set_verbose(level, *_):
     """Set verbosity level for debugging"""
     C_.verbose = level
     printi(f'Setting verbose to {level}')
-    publish('verbose',level)
 
 def set_server(servState, *_):
     """Example of the setter for the server PV.
@@ -306,19 +309,15 @@ def set_server(servState, *_):
     C_.serverStateChanged(servState)
     if servState == 'Start':
         printi('Starting the server')
-        publish('server','Started')
         publish('status','Started')
     elif servState == 'Stop':
         printi('server stopped')
-        publish('server','Stopped')
         publish('status','Stopped')
     elif servState == 'Exit':
         printi('server is exiting')
-        publish('server','Exited')
         publish('status','Exited')
     elif servState == 'Clear':
         publish('status','Cleared')
-        # set server to previous servState
         set_server(C_.serverState)
         return
     C_.serverState = servState
@@ -563,7 +562,6 @@ if __name__ == "__main__":
         accordingly."""
         printi(f'Setting tAxis to {value}')
         publish('tAxis', np.arange(value)*1.E-6)
-        publish('recordLength', value)
 
     def init(recordLength):
         """Example of device initialization function"""
@@ -622,11 +620,13 @@ if __name__ == "__main__":
     # The rest of options are not essential, they can be controlled at runtime using PVs.
     parser.add_argument('-n', '--npoints', type=int, default=100, help=
 'Number of points in the waveform')
-    parser.add_argument('-p', '--putlogPV', default='putlog:dump', help=
-'Name of the PV where put operations are logged. If None, then put operations are not logged.')
+    parser.add_argument('-p', '--putlogPV', nargs='?', default='', help=
+'PV name for logging put operations. If given without argument, then putlog is disabled. If not given, then putlog is set to "putlog:dump".')
     parser.add_argument('-v', '--verbose', action='count', default=0, help=
 'Show more log messages (-vv: show even more)') 
     pargs = parser.parse_args()
+    if pargs.putlogPV == '':
+        pargs.putlogPV = 'putlog:dump'
     print(pargs)
 
     # Initialize epicsdev and PVs
