@@ -1,4 +1,5 @@
-# epicsdev
+# epicsdev.
+**This repository is obsolete. Development has moved to [eicorg/epicsdev](https://github.com/eicorg/epicsdev)**.
 
 `epicsdev` is a small Python toolkit for building **EPICS PVAccess** servers with
 [p4p](https://github.com/epics-base/p4p).
